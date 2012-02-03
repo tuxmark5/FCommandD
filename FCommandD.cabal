@@ -1,0 +1,20 @@
+name:           FCommandD
+version:        0.0.1
+cabal-version:  -any
+build-type:     Simple
+license:        AllRightsReserved
+build-depends:  base -any, binary -any, bindings-DSL -any, 
+                bytestring -any, bytestring-lexing >= 0.3.0,
+                containers -any, directory -any, dbus-client -any,
+                dbus-core -any, haskell98 -any, ioctl -any, 
+                network -any, time -any, transformers -any, unix -any
+description:    .
+author:         tux_mark_5
+executable:     FCommandD
+main-is:        Main.hs
+buildable:      True
+hs-source-dirs: src
+ghc-options:    -threaded
+other-modules:  System.Linux.Input
+                System.Linux.UInput
+                
