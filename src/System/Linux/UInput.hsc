@@ -19,7 +19,8 @@ import Foreign.Marshal.Array
 import Foreign.Ptr
 import Foreign.Storable
 import System.Linux.Input
-import System.Posix.IO (OpenMode(..), defaultFileFlags, fdWriteBuf, openFd)
+import System.Posix.IO (FdOption(..), OpenMode(..), defaultFileFlags, fdWriteBuf, 
+                        setFdOption, openFd)
 import System.Posix.IOCtl
 import System.Posix.Types (Fd)
 {- ########################################################################################## -}
@@ -116,6 +117,7 @@ instance IOControl UISetBit CInt where
 uiCreateDevice :: UIUserDevice -> IO Fd
 uiCreateDevice d = do
   fd <- openFd "/dev/uinput" WriteOnly Nothing defaultFileFlags
+  setFdOption fd CloseOnExec True
   storableWrite fd (convertUIUserDevice d)
   return fd
   

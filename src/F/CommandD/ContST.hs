@@ -4,6 +4,7 @@ module F.CommandD.ContST
 , get
 , mapContST
 , put
+, saveContST
 ) where
   
 {- ########################################################################################## -}
@@ -36,5 +37,10 @@ mapContST fun m = ContST $ \s0 c -> fun $ runContST m s0 c
   
 put :: (Monad m) => s -> ContST s r m ()
 put s1 = ContST $ \_ c -> c s1 ()
-  
+
+saveContST :: (Monad m) => (m r -> ContST s r m ()) -> ContST s r m ()
+saveContST fun = ContST $ \s0 c -> do
+  let m = fun $ c s0 () >>= return . snd
+  runContST m s0 c
+ 
 {- ########################################################################################## -}

@@ -7,7 +7,7 @@ module F.CommandD.Source.EVDevSource
 import            F.CommandD.Daemon
 import            F.CommandD.Source
 import            System.Linux.Input (inputGrab, inputRead)
-import            System.Posix.IO (OpenMode(..), defaultFileFlags, openFd)
+import            System.Posix.IO (FdOption(..), OpenMode(..), defaultFileFlags, openFd, setFdOption)
 import            System.Posix.Types (Fd)
 {- ########################################################################################## -}
 
@@ -21,6 +21,7 @@ instance SourceC EVDevSource where
 mkEVDevSource :: FilePath -> CD (Source EVDevSource)
 mkEVDevSource dev = lift $ do
   fd <- openFd dev ReadOnly Nothing defaultFileFlags
+  setFdOption fd CloseOnExec True
   inputGrab fd True
   return $ Source $ EVDevSource
     { handle = fd

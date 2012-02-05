@@ -4,17 +4,19 @@ module F.CommandD.Filter.DebugFilter
 ) where
 
 {- ########################################################################################## -}
+import F.CommandD.ContST
 import F.CommandD.Daemon
 import F.CommandD.Filter
+import System.IO
 {- ########################################################################################## -}
 
 data DebugFilter = DebugFilter
 
-instance FilterC DebugFilter where
-  sinkWrite _ = lift $ do
-    putStrLn "GOT IT"
+instance SinkC DebugFilter where
+  sinkWrite _ = get >>= \e -> lift $ do
+    putStrLn $ (show $ eventType e) ++ " <> " ++ (show $ eventCode e) ++ " <> " ++ (show $ eventValue e)
 
-mkDebugFilter :: CD Filter
-mkDebugFilter = return $ Filter $ DebugFilter
+mkDebugFilter :: CD (Filter DebugFilter)
+mkDebugFilter = return $ Sink $ DebugFilter
   
 {- ########################################################################################## -}

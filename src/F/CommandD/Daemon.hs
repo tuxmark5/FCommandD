@@ -1,6 +1,7 @@
 module F.CommandD.Daemon
 ( CD(..)
 , CE(..)
+, Daemon(..)
 , Event(..)
 , daemon
 , forkCD

@@ -3,8 +3,8 @@
 
 module F.CommandD.Filter.HubFilter
 ( HubFilter(..)
-, hubNew
 , hubSetSink
+, mkHub
 ) where
 
 {- ########################################################################################## -}
@@ -25,8 +25,8 @@ instance SinkC HubFilter where
       (Just (SinkA sink)) -> sinkWrite sink
       Nothing             -> return ()
     
-hubNew :: CD (Filter HubFilter)
-hubNew = lift $ do
+mkHub :: CD (Filter HubFilter)
+mkHub = lift $ do
   ref <- newIORef Nothing
   return $ Sink $ HubFilter ref
 

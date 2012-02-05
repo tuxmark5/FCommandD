@@ -1,16 +1,15 @@
-module F.CommandD.Filter
-( Filter(..)
-, FilterC(..)
-, Sink(..)
-, SinkC(..)
+module F.CommandD.Util.Directory
+( mapDir
 ) where
-
-{- ########################################################################################## -}
-import F.CommandD.Sink
-{- ########################################################################################## -}
-
-class SinkC a => FilterC a
   
-type Filter = Sink
-  
+{- ########################################################################################## -}
+import Data.Maybe (catMaybes)
+import System.Directory
+{- ########################################################################################## -}
+
+mapDir :: FilePath -> (FilePath -> FilePath -> IO (Maybe a)) -> IO [a]
+mapDir dir fun = do
+  entries <- getDirectoryContents dir
+  mapM (fun dir) entries >>= return . catMaybes 
+
 {- ########################################################################################## -}
