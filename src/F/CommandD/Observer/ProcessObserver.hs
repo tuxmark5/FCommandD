@@ -1,13 +1,13 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
-module F.CommandD.Monitor.ProcessMonitor
+module F.CommandD.Observer.ProcessObserver
 ( Environment
 , ProcessEvent(..)
-, ProcessMonitor(..)
+, ProcessObserver(..)
 , getProcCmdLine
 , getProcEnv
-, newProcessMonitor
+, newProcessObserver
 , withINotify
 ) where
   
@@ -33,7 +33,7 @@ data ProcessEvent
   = ProcessCreated    Int
   | ProcessDestroyed  Int
 
-data ProcessMonitor = ProcessMonitor
+data ProcessObserver = ProcessObserver
   { pmChan        :: ChanO ProcessEvent
   , pmWakeVar     :: MVar ()
   , pmWatchDescr  :: WatchDescriptor
@@ -59,7 +59,7 @@ getProcEnv pid = handle [] $ do
 getProcesses :: IO [Int]
 getProcesses = mapDir "/proc" $ \f -> return . readMaybe
 
-monitorLoop :: ProcessMonitor -> [Int] -> IO ()
+monitorLoop :: ProcessObserver -> [Int] -> IO ()
 monitorLoop pm pids0 = do
   takeMVar (pmWakeVar pm)
   threadDelay 100000
@@ -70,12 +70,12 @@ monitorLoop pm pids0 = do
   threadDelay 2000000
   monitorLoop pm pids1
   
-newProcessMonitor :: INotify -> IO (ProcessMonitor, ChanI ProcessEvent)
-newProcessMonitor inotify = do
+newProcessObserver :: INotify -> IO (ProcessObserver, ChanI ProcessEvent)
+newProcessObserver inotify = do
   (chanI, chanO)  <- newChan
   wakeVar         <- newEmptyMVar
   watchDescr      <- addWatch inotify [Open] "/lib64/ld-linux-x86-64.so.2" (eventHandler wakeVar)
-  let pm = ProcessMonitor chanO wakeVar watchDescr
+  let pm = ProcessObserver chanO wakeVar watchDescr
   forkIO $ monitorLoop pm []
   return (pm, chanI)
   

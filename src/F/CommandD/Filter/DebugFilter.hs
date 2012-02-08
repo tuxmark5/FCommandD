@@ -14,7 +14,7 @@ data DebugFilter = DebugFilter
 
 instance SinkC DebugFilter where
   sinkWrite _ = get >>= \e -> lift $ do
-    putStrLn $ (show $ eventType e) ++ " <> " ++ (show $ eventCode e) ++ " <> " ++ (show $ eventValue e)
+    putStrLn $ show e
 
 mkDebugFilter :: CD (Filter DebugFilter)
 mkDebugFilter = return $ Sink $ DebugFilter

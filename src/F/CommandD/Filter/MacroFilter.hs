@@ -2,6 +2,9 @@
 
 module F.CommandD.Filter.MacroFilter
 ( MacroFilter(..)
+, ModeM
+, aliasDev
+, aliasKey
 , command
 , mkMacroFilter
 , mode
@@ -13,6 +16,8 @@ import            Control.Concurrent (forkIO)
 import            Control.Monad (forM_, replicateM_, when)
 import            Control.Monad.Trans.State (State(..), StateT(..), evalStateT)
 import qualified  Control.Monad.Trans.State as S
+import            Data.ByteString.Char8 (ByteString)
+import qualified  Data.ByteString.Char8 as B
 import            Data.Int (Int32)
 import            Data.List (partition)
 import            Data.IORef
@@ -21,6 +26,7 @@ import            F.CommandD.Daemon
 import            F.CommandD.Filter
 import            F.CommandD.Filter.MacroParser
 import            F.CommandD.Sink
+import            F.CommandD.Source (SourceId)
 import            F.CommandD.Util.KeyMap
 import            System.Linux.Input
 {- ########################################################################################## -}
@@ -30,6 +36,7 @@ type MacroFilter = IORef MacroFilterS
 data MacroFilterS = MacroFilterS
   { mfsActions      :: [CD ()] 
   , mfsFilteredKeys :: [Key]
+  , mfsKeyMap       :: KeyMap
   , mfsModes        :: [Mode]
   , mfsNodes        :: [Node]
   , mfsPressedKeys  :: [Key]
@@ -131,7 +138,7 @@ runMacroM var m = do
   lift $ do
     writeIORef var state1 { mfsActions = [] }
     forM_ (mfsActions state1) $ \act -> forkIO $ do
-      (_, _) <- runStateT act Daemon
+      (_, _) <- runStateT act Daemon { } -- FIX!!
       return ()
   return r
   
@@ -148,15 +155,16 @@ synEvent base   = base
   }
   
 testNode :: Int -> Node -> MacroM ()
-testNode 0 _        = return ()
+testNode 0 node = do
+  when ((not $ isLeafNode node) && (keyFlag (nodeKey node) == 0)) $ do
+    appendNode node
+  case (nodeAction node) of
+    Just act  -> appendAction act
+    Nothing   -> return ()
+  
 testNode depth node = 
   forM_ (nodeChildren node) $ \n -> do
     isKeyPressed (nodeKey n) >>= \p -> when p $ do
-      when ((not $ isLeafNode n) && (keyFlag (nodeKey n) == 0)) $ do
-        appendNode n
-      case (nodeAction n) of
-        Just act  -> appendAction act
-        Nothing   -> return ()
       testNode (depth - 1) n
 
 testNodes :: MacroM ()
@@ -165,7 +173,10 @@ testNodes = removeNodes $ \nodes -> do
   forM_ nodes $ testNode depth
   
 toKey :: Event -> Key
-toKey e = defaultKey { keyCode = fromIntegral $ eventCode e }
+toKey e = defaultKey 
+  { keyCode   = fromIntegral $ eventCode e
+  , keyDevice = eventSource e
+  }
 
 updatePressedKeys :: Event -> Key -> MacroM ()
 updatePressedKeys e key = modifyPressedKeys $ case (eventValue e) of
@@ -204,6 +215,17 @@ printNode i node = do
   forM_ (nodeChildren node) $ printNode (i + 1)
   
 {- ########################################################################################## -}
+ 
+aliasDev :: SourceId -> ByteString -> ModeM ()
+aliasDev sid name = S.modify $ \(ModeS kmap mode) -> (ModeS (addDev kmap name sid) mode)
+ 
+aliasKey :: ByteString -> ByteString -> ByteString -> ModeM ()
+aliasKey key0 dev1 key1 = S.get >>= \(ModeS kmap mode) -> do
+  let key = lookupKey kmap key0
+      dev = lookupDev kmap dev1
+  case (dev, key) of
+    (Just d,  Just k) -> S.put $ ModeS (addKey kmap key1 d (keyCode k)) (mode)
+    (d,       k     ) -> lift $ putStrLn $ concat ["[ERROR] Invalid key alias", show d, show k]
  
 addMacro :: Mode -> CD () -> [Key] -> Mode
 addMacro m0 act combo = m0 { modeRootNode = addMacro' (modeRootNode m0) act combo }
@@ -247,6 +269,7 @@ mkMacroFilter = do
   ref <- lift $ newIORef MacroFilterS
     { mfsActions      = []
     , mfsFilteredKeys = []
+    , mfsKeyMap       = defaultKeyMap
     , mfsModes        = []
     , mfsNodes        = []
     , mfsPressedKeys  = []
@@ -270,9 +293,10 @@ mode name m = StateT $ \(ModeS kmap mode0) -> do
 runMode :: Filter MacroFilter -> ModeM a -> CD a
 runMode (Sink f) m = lift $ do
   dat0                <- readIORef f
-  (a, ModeS _ mode1)  <- runStateT m $ ModeS defaultKeyMap (mfsRootMode dat0)
+  (a, ModeS k mode1)  <- runStateT m $ ModeS (mfsKeyMap dat0) (mfsRootMode dat0)
   writeIORef f dat0 
-    { mfsModes      = flattenModes mode1
+    { mfsKeyMap     = k
+    , mfsModes      = flattenModes mode1
     , mfsRootMode   = mode1 
     }
   return a

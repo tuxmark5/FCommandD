@@ -125,7 +125,8 @@ data Event  = Event
   , eventType   :: !Word16
   , eventCode   :: !Word16
   , eventValue  :: !Int32
-  }
+  , eventSource :: !Int32
+  } deriving (Show)
   
 fromEvent :: Event -> C'input_event
 fromEvent d = C'input_event
@@ -141,6 +142,7 @@ toEvent d = Event
   , eventType   = c'input_event'type  d
   , eventCode   = c'input_event'code  d
   , eventValue  = c'input_event'value d
+  , eventSource = 0
   }
 
 {- ########################################################################################## -}
@@ -185,7 +187,7 @@ defaultInputId = InputId
 data Timeval = Timeval
   { timevalSec  :: !Int64
   , timevalUSec :: !Int64
-  }
+  } deriving (Show)
   
 fromTimeval :: Timeval -> C'timeval
 fromTimeval d = C'timeval

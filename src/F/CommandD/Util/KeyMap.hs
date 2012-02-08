@@ -1,15 +1,24 @@
+{-# LANGUAGE OverloadedStrings #-}
+
 module F.CommandD.Util.KeyMap
 ( Key(..)
 , KeyMap(..)
+, addDev
+, addKey
 , defaultDevices
 , defaultKey
 , defaultKeyMap
 , defaultKeys
+, lookupDev
+, lookupDevKey
+, lookupDevKey'
 , lookupKey
 , mkKeyMap
 ) where
   
 {- ########################################################################################## -}
+import            Data.ByteString.Char8 (ByteString)
+import qualified  Data.ByteString.Char8 as B
 import            Data.Int (Int32)
 import            Data.Map (Map)
 import qualified  Data.Map as M
@@ -23,8 +32,8 @@ data Key  = Key
   } 
   
 data KeyMap = KeyMap
-  { keyMapDevices :: Map String Int32
-  , keyMapKeys    :: Map String Key
+  { keyMapDevices :: Map ByteString Int32
+  , keyMapKeys    :: Map ByteString Key
   }
   
 instance Eq Key where
@@ -40,6 +49,19 @@ instance Show Key where
               
 {- ########################################################################################## -}
 
+addDev :: KeyMap -> ByteString -> Int32 -> KeyMap
+addDev kmap name dev = kmap
+  { keyMapDevices = M.insert name dev (keyMapDevices kmap) }  
+    
+addKey :: KeyMap -> ByteString -> Int32 -> Int32 -> KeyMap
+addKey kmap name dev key = kmap
+  { keyMapKeys = M.insert name k (keyMapKeys kmap) } where 
+  k = Key
+    { keyCode     = key
+    , keyDevice   = dev
+    , keyFlag     = 0
+    }
+
 defaultKey :: Key
 defaultKey = Key
   { keyCode     = 0
@@ -50,8 +72,11 @@ defaultKey = Key
 defaultKeyMap :: KeyMap
 defaultKeyMap = mkKeyMap defaultDevices defaultKeys
 
-lookupKey :: KeyMap -> String -> String -> Maybe Key
-lookupKey kmap dev key = let
+lookupDev :: KeyMap -> ByteString -> Maybe Int32
+lookupDev kmap dev = M.lookup dev $ keyMapDevices kmap
+
+lookupDevKey :: KeyMap -> ByteString -> ByteString -> Maybe Key
+lookupDevKey kmap dev key = let
   d0 = M.lookup dev $ keyMapDevices kmap
   k0 = M.lookup key $ keyMapKeys    kmap
   in case (d0, k0) of
@@ -59,7 +84,13 @@ lookupKey kmap dev key = let
     (Just d,   Just k) -> Just $ k { keyDevice = d }
     (_,       _      ) -> Nothing
 
-mkKeyMap :: [(String, Int32)] -> [(String, Int32)] -> KeyMap
+lookupDevKey' :: KeyMap -> String -> String -> Maybe Key
+lookupDevKey' kmap dev key = lookupDevKey kmap (B.pack dev) (B.pack key)
+
+lookupKey :: KeyMap -> ByteString -> Maybe Key
+lookupKey kmap key = M.lookup key $ keyMapKeys kmap
+
+mkKeyMap :: [(ByteString, Int32)] -> [(ByteString, Int32)] -> KeyMap
 mkKeyMap devs keys = KeyMap
   { keyMapDevices = M.fromList devs
   , keyMapKeys    = M.fromList $ map (\(n, i) -> (n, Key i 0 0)) keys
@@ -67,7 +98,7 @@ mkKeyMap devs keys = KeyMap
   
 {- ########################################################################################## -}
 
-defaultDevices :: [(String, Int32)]
+defaultDevices :: [(ByteString, Int32)]
 defaultDevices = 
   [ ("",                    0                   )
   , ("all",                 0                   )
@@ -75,7 +106,7 @@ defaultDevices =
 
 {- ########################################################################################## -}
 
-defaultKeys :: [(String, Int32)]
+defaultKeys :: [(ByteString, Int32)]
 defaultKeys =
   [ ("@0",                  btn0                )
   , ("@1",                  btn1                )

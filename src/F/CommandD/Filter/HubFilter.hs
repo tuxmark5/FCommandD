@@ -4,7 +4,7 @@
 module F.CommandD.Filter.HubFilter
 ( HubFilter(..)
 , hubSetSink
-, mkHub
+, newHub
 ) where
 
 {- ########################################################################################## -}
@@ -24,14 +24,16 @@ instance SinkC HubFilter where
     case val of
       (Just (SinkA sink)) -> sinkWrite sink
       Nothing             -> return ()
+      
+{- ########################################################################################## -}
     
-mkHub :: CD (Filter HubFilter)
-mkHub = lift $ do
+hubSetSink :: SinkC s => Sink HubFilter -> Sink s -> IO ()
+hubSetSink (Sink (HubFilter var)) (Sink s) = do
+  writeIORef var (Just $ SinkA s)
+  
+newHub :: CD (Filter HubFilter)
+newHub = lift $ do
   ref <- newIORef Nothing
   return $ Sink $ HubFilter ref
-
-hubSetSink :: SinkC s => Sink HubFilter -> Sink s -> CD ()
-hubSetSink (Sink (HubFilter var)) (Sink s) = lift $ do
-  writeIORef var (Just $ SinkA s)
 
 {- ########################################################################################## -}
