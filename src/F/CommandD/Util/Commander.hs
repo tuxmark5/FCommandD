@@ -100,13 +100,13 @@ loopFocus :: Commander -> ChanI FocusEvent -> IO ()
 loopFocus cmd cf = forever $ do
   e <- readChan cf
   putStrLn $ show e
-  
+
 loopSession :: Commander -> IO ()
 loopSession cmd = forever $ do
   e <- readChan (cmdSesChan cmd)
   case e of
-    SessionCreated    ses -> onNewSession cmd ses
-    SessionDestroyed  ses -> return ()
+    SessionCreated    ses -> onSessionCreated cmd ses
+    SessionDestroyed  ses -> onSessionDestroyed cmd ses
 
 newCommander :: (Session -> IO ByteString) -> CmdM () -> CD (Commander, Sink HubFilter)
 newCommander profId m = do
@@ -159,19 +159,28 @@ modifyProfiles cmd mod = modifyMVar_ (cmdProfiles cmd) $ \p0 -> do
     otherwise         -> return ()
   return p1
   
-onNewSession :: Commander -> Session -> IO ()
-onNewSession cmd ses = do
+onSessionCreated :: Commander -> Session -> IO ()
+onSessionCreated cmd ses = do
   putStrLn $ show $ sesDisplay ses
+  -- Start the FocusObserver
   setEnv "XAUTHORITY" (B.unpack $ sesXAuthority ses) True
-  name          <- cmdProfId cmd ses
   (fobs, fc)    <- newFocusObserver $ sesDisplay ses
+  forkIO $ loopFocus cmd fc
+  
+  -- Connect to DBus
   let (Just ad)  = addresses $ decodeUtf8 $ sesAddress ses
   client        <- connectFirst ad
-  forkIO $ loopFocus cmd fc
+  
+  -- Update profile
+  name          <- cmdProfId cmd ses
   modifyProfile cmd name $ \p0 -> p0
     { prSession = Just ses
     , prClient  = client
     }
+  
+onSessionDestroyed :: Commander -> Session -> IO ()
+onSessionDestroyed cmd ses = do
+  putStrLn $ "[-] Session destroyed: " ++ (show $ sesDisplay ses)
   
 {- ########################################################################################## -}
   

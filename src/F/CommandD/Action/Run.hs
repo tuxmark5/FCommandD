@@ -25,7 +25,7 @@ runInSession ses uid cmd args = do
     createSession
     pid <- forkProcess $ do
       -- setUserID uid
-      changeWorkingDirectory $ B.unpack $ sesHome ses
+      -- changeWorkingDirectory $ B.unpack $ sesHome ses
       executeFile cmd True args $ Just $ getEnvironmentPairs ses
     createProcessGroupFor pid
     exitImmediately ExitSuccess

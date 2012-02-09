@@ -16,10 +16,11 @@ import            Data.Bits
 import            Data.ByteString.Char8 (ByteString)
 import qualified  Data.ByteString.Char8 as B
 import            Data.IORef
+import            Data.Maybe
 import            F.CommandD.Chan
-import            Graphics.X11.Types
-import            Graphics.X11.Xlib
-import            Graphics.X11.Xlib.Extras
+import qualified  Graphics.XHB as X
+import            Graphics.XHB.Connection
+import            Graphics.XHB.High.Xproto
 import            System.IO
 {- ########################################################################################## -}
 
@@ -31,14 +32,14 @@ data FocusEvent = FocusEvent
   } deriving (Show)
 
 data FocusObserver = FocusObserver
-  { foActiveWindow          :: IORef Window
+  { foActiveWindow          :: IORef Window 
   , foAtomNetActiveWindow   :: Atom
   , foAtomNetWMName         :: Atom
   , foAtomWMClass           :: Atom
   , foAtomWMCommand         :: Atom
   , foAtomWMName            :: Atom
   , foChan                  :: ChanO FocusEvent
-  , foDisplay               :: Display
+  , foConnection            :: Connection
   , foRootWindow            :: Window
   }
  
@@ -46,25 +47,24 @@ data FocusObserver = FocusObserver
 
 infixr 1 <|
 
-(<|) :: IO a -> IO a -> IO a
-a <| b = E.catch a $ \(E.SomeException _) -> b
+(<|) :: IO (Maybe a) -> IO a -> IO a
+a <| b = a >>= \ar -> case ar of
+  Just r  -> return r
+  Nothing -> b
 
-getActiveWindow :: FocusObserver -> IO (Maybe [Window])
-getActiveWindow s = rawGetWindowProperty 32 (foDisplay s) (foAtomNetActiveWindow s) (foRootWindow s) 
+g :: IO (Receipt a) -> IO a
+g r = do
+  (Right a) <- r >>= X.getReply
+  return a
 
-getTextProperty' :: Display -> Window -> Atom -> IO ByteString
-getTextProperty' _ 0 _ = return ""
-getTextProperty' d w a = do
-  tp  <- getTextProperty d w a
-  str <- B.packCString $ tp_value tp
-  xFree $ tp_value tp
-  return str
+getActiveWindow :: FocusObserver -> IO (Maybe Window)
+getActiveWindow s = getProperty (foConnection s) (foRootWindow s) (foAtomNetActiveWindow s)
 
-handleEvent :: FocusObserver -> Event -> IO ()
-handleEvent s e@PropertyEvent { } | ev_atom e == foAtomNetActiveWindow s = do
+handleEvent :: FocusObserver -> X.PropertyNotifyEvent -> IO ()
+handleEvent s e | X.atom_PropertyNotifyEvent e == foAtomNetActiveWindow s = do
   actW <- getActiveWindow s
   case actW of
-    Just (w:_)  -> writeFocusEvent s w 
+    Just w      -> writeFocusEvent s w 
     otherwise   -> return ()
 handleEvent _ _ = return ()
 
@@ -72,23 +72,25 @@ handleException :: E.SomeException -> IO ()
 handleException e = putStrLn $ "___" ++ show e
 
 mainLoop :: FocusObserver -> IO ()
-mainLoop s = allocaXEvent $ \evt -> forever $ do
-  nextEvent (foDisplay s) evt
-  getEvent evt >>= E.handle handleException . handleEvent s
+mainLoop s = do
+  evt <- X.waitForEvent $ foConnection s
+  case fromEvent evt of
+    Just e    -> handleEvent s e >> mainLoop s
+    Nothing   -> return ()
 
 newFocusObserver :: ByteString -> IO (FocusObserver, ChanI FocusEvent)
 newFocusObserver dpy' = do
-  dpy       <- openDisplay $ B.unpack dpy'
-  (cI, cO)  <- newChan
-  rootW     <- rootWindow dpy (defaultScreen dpy)
-  atNAW     <- internAtom dpy "_NET_ACTIVE_WINDOW"  False
-  atNWN     <- internAtom dpy "_NET_WM_NAME"        False
-  atWCl     <- internAtom dpy "WM_CLASS"            False
-  atWCm     <- internAtom dpy "WM_COMMAND"          False
-  atWNa     <- internAtom dpy "WM_NAME"             False
-  aw        <- newIORef 0
+  (Just conn) <- connectTo $ B.unpack dpy'
+  (cI, cO)    <- newChan
+  rootW       <- return $ getRoot conn 
+  atNAW       <- g $ internAtom conn "_NET_ACTIVE_WINDOW"  False
+  atNWN       <- g $ internAtom conn "_NET_WM_NAME"        False
+  atWCl       <- g $ internAtom conn "WM_CLASS"            False
+  atWCm       <- g $ internAtom conn "WM_COMMAND"          False
+  atWNa       <- g $ internAtom conn "WM_NAME"             False
+  aw          <- newIORef rootW
   
-  selectInput dpy rootW $ propertyChangeMask
+  selectInput conn rootW [EventMaskPropertyChange]
   let fo = FocusObserver { 
       foActiveWindow        = aw
     , foAtomNetActiveWindow = atNAW
@@ -97,7 +99,7 @@ newFocusObserver dpy' = do
     , foAtomWMCommand       = atWCm
     , foAtomWMName          = atWNa
     , foChan                = cO
-    , foDisplay             = dpy
+    , foConnection          = conn
     , foRootWindow          = rootW
     }
     
@@ -114,6 +116,6 @@ writeFocusEvent s w = do
       <| getProp foAtomWMName
       <| return ""
   writeChan (foChan s) $ FocusEvent cls [cmd] nam w
-  where getProp acc = getTextProperty' (foDisplay s) w (acc s) 
+  where getProp acc = getProperty (foConnection s) w (acc s)
   
 {- ########################################################################################## -}

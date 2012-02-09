@@ -52,11 +52,8 @@ instance SinkC MacroFilter where
       _ | et == evMSC -> exitContST () --supressEvent var
         | et == evREL -> return () -- appendEvent $ synEvent e
         | et == evSYN -> return () -- exitContST ()
-        | et == evKEY -> do
-          filt <- runMacroM var (processKeyEvent e) 
-          if filt
-            then exitContST ()
-            else appendEvent $ synEvent e
+        | et == evKEY -> handleKeyEvent var
+        | otherwise   -> handleUnknownEvent
 
 {- ########################################################################################## -}
   
@@ -72,6 +69,18 @@ appendEvent e1 = ContST $ \e0 c -> c e0 () >> c e1 ()
 appendNode :: Node -> MacroM ()
 appendNode node = S.modify $ \s -> s { mfsNodes = node:(mfsNodes s) }
 
+handleKeyEvent :: MacroFilter -> CE ()
+handleKeyEvent var = get >>= \e -> do
+  filt <- runMacroM var (processKeyEvent e) 
+  if filt
+    then exitContST ()
+    else appendEvent $ synEvent e
+
+handleUnknownEvent :: CE ()
+handleUnknownEvent = get >>= \e -> do
+  lift $ putStrLn $ "Unknown event: " ++ (show e)
+  return ()
+  
 isKeyFiltered :: Key -> MacroM Bool
 isKeyFiltered key = S.gets mfsFilteredKeys >>= return . any (== key) 
 

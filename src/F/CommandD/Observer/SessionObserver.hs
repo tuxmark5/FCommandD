@@ -76,7 +76,10 @@ getEnvironmentPairs = map (\(a, b) -> (B.unpack a, B.unpack b)) . sesEnvironment
 getProcSession :: Int -> SesM Session
 getProcSession pid = lift $ do
   env <- getProcEnv pid
-  return $ foldl folder newSession env where
+  return $ foldl folder newSession
+    { sesEnvironment  = env
+    , sesPID          = pid
+    } env where
   folder s ("DBUS_SESSION_BUS_ADDRESS", v)  = s { sesAddress    = v }
   folder s ("DISPLAY",                  v)  = s { sesDisplay    = B.take 2 v }
   folder s ("HOME",                     v)  = s { sesHome       = v }

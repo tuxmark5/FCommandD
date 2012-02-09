@@ -27,6 +27,8 @@ import            Data.ByteString.Char8 (ByteString)
 import qualified  Data.ByteString.Char8 as B
 import            F.CommandD.Observer.SessionObserver
 
+import            F.CommandD.Observer.FocusObserver
+
 -- TODO: EVDev hotplug
 -- TOOD: Session termination
 -- TODO: event simulation
