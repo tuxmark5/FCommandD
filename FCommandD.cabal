@@ -10,7 +10,7 @@ build-depends:  base -any, binary -any, bindings-DSL -any, bytestring -any,
                 time -any, transformers -any, unix == 2.5.0.0, X11 -any
 description:    .
 author:         tux_mark_5
-executable:     FCommandD
+executable:     fcommandd
 main-is:        Main.hs
 buildable:      True
 hs-source-dirs: src

@@ -4,9 +4,11 @@ module F.CommandD.Action.Run
 ) where
 
 {- ########################################################################################## -}
+import qualified  Data.ByteString.Char8 as B
 import            F.CommandD.Observer.SessionObserver
 import            System.Exit (ExitCode(..))
 import            System.Posix
+import            System.Posix.Directory (changeWorkingDirectory)
 {- ########################################################################################## -}
   
 {-runAs :: SessionObserver -> ByteString -> FilePath -> IO ()
@@ -23,6 +25,7 @@ runInSession ses uid cmd args = do
     createSession
     pid <- forkProcess $ do
       -- setUserID uid
+      changeWorkingDirectory $ B.unpack $ sesHome ses
       executeFile cmd True args $ Just $ getEnvironmentPairs ses
     createProcessGroupFor pid
     exitImmediately ExitSuccess

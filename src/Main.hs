@@ -31,6 +31,12 @@ import            F.CommandD.Observer.SessionObserver
 -- TOOD: Session termination
 -- TODO: event simulation
 
+{-
+  NOTES:
+  * add "Defaults exempt_group=root" into sudoers
+  * add dbus policy for root
+-}
+
 {- ########################################################################################## -}
 
 -- Select input devices
@@ -89,6 +95,7 @@ modeGuayadeque call = do
   command "+PreviousSong"     $ call $ gdqPrev
   command "+StopCD"           $ call $ gdqStop
 
+  command "*Hyper+N10"        $ call $ gdqPrev
   command "*Hyper+N11"        $ call $ gdqPlayPause
   command "*Hyper+N12"        $ call $ gdqNext
   
@@ -114,9 +121,10 @@ modeXMonad call = do
     command ("*Hyper*LeftAlt+" ++ [key]) $ call $ xmonadWkMoveWindow [wk]
   
 {- ########################################################################################## -}
-  
+
 main :: IO ()
 main = daemon $ do
+  lift $ putStrLn "[*] Starting ..."
   evdev       <- mkEVDevSourceDyn mdev
   uinput0     <- mkUInputSink "UInput: Primary"
   uinput1     <- mkUInputSink "UInput: DisplayLink"
@@ -138,6 +146,7 @@ main = daemon $ do
     mode "xmonad"       $ modeXMonad call
   
   evdev >>> macro >>> hub
+  lift $ putStrLn "[*] Initialized ..."
   lift $ forever $ threadDelay 500000000
 
 {- ########################################################################################## -}

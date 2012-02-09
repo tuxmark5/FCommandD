@@ -37,6 +37,7 @@ import            F.CommandD.Observer.FocusObserver
 import            F.CommandD.Observer.ProcessObserver
 import            F.CommandD.Observer.SessionObserver
 import            F.CommandD.Sink
+import            System.Posix.Env (setEnv)
 {- ########################################################################################## -}
 
 type CmdM a = StateT Commander IO a
@@ -161,6 +162,7 @@ modifyProfiles cmd mod = modifyMVar_ (cmdProfiles cmd) $ \p0 -> do
 onNewSession :: Commander -> Session -> IO ()
 onNewSession cmd ses = do
   putStrLn $ show $ sesDisplay ses
+  setEnv "XAUTHORITY" (B.unpack $ sesXAuthority ses) True
   name          <- cmdProfId cmd ses
   (fobs, fc)    <- newFocusObserver $ sesDisplay ses
   let (Just ad)  = addresses $ decodeUtf8 $ sesAddress ses

@@ -13,6 +13,7 @@ module F.CommandD.Filter.MacroFilter
 
 {- ########################################################################################## -}
 import            Control.Concurrent (forkIO)
+import            Control.Concurrent.MVar
 import            Control.Monad (forM_, replicateM_, when)
 import            Control.Monad.Trans.State (State(..), StateT(..), evalStateT)
 import qualified  Control.Monad.Trans.State as S
@@ -188,6 +189,7 @@ updatePressedKeys e key = modifyPressedKeys $ case (eventValue e) of
 
 data Mode = Mode
   { modeChildren  :: [Mode]
+  , modeEnabled   :: MVar Bool
   , modeName      :: String
   , modeRootNode  :: Node
   }
@@ -266,29 +268,34 @@ flattenModes mode = mode:(concat $ map flattenModes $ modeChildren mode)
   
 mkMacroFilter :: CD (Filter MacroFilter)
 mkMacroFilter = do
-  ref <- lift $ newIORef MacroFilterS
+  mode  <- lift $ newMode ""
+  ref   <- lift $ newIORef MacroFilterS
     { mfsActions      = []
     , mfsFilteredKeys = []
     , mfsKeyMap       = defaultKeyMap
     , mfsModes        = []
     , mfsNodes        = []
     , mfsPressedKeys  = []
-    , mfsRootMode     = mkMode []
+    , mfsRootMode     = mode
     , mfsSupressed    = []
     }
   return $ Sink ref
   
-mkMode :: String -> Mode
-mkMode name = Mode
-  { modeChildren  = []
-  , modeName      = name
-  , modeRootNode  = defaultNode
-  }
+newMode :: String -> IO Mode
+newMode name = do
+  enabled <- newMVar True
+  return $ Mode
+    { modeChildren  = []
+    , modeEnabled   = enabled
+    , modeName      = name
+    , modeRootNode  = defaultNode
+    }
   
 mode :: String -> ModeM a -> ModeM a
 mode name m = StateT $ \(ModeS kmap mode0) -> do
-  (a, ModeS _ newMode) <- runStateT m $ ModeS kmap (mkMode name)
-  return (a, ModeS kmap (addMode mode0 newMode))
+  newMode0              <- newMode name
+  (a, ModeS _ newMode1) <- runStateT m $ ModeS kmap newMode0
+  return (a, ModeS kmap (addMode mode0 newMode1))
 
 runMode :: Filter MacroFilter -> ModeM a -> CD a
 runMode (Sink f) m = lift $ do

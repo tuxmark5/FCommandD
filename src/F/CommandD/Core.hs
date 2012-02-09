@@ -3,6 +3,7 @@ module F.CommandD.Core
 , CE(..)
 , Daemon(..)
 , Event(..)
+, catchCD 
 , forkCD
 , lift
 , runCE
@@ -10,6 +11,7 @@ module F.CommandD.Core
   
 {- ########################################################################################## -}
 import            Control.Concurrent (forkIO)
+import qualified  Control.Exception as E
 import            Control.Monad.Trans.Class (MonadTrans(..))
 import            Control.Monad.Trans.State (StateT(..), evalStateT)
 import            F.CommandD.ContST
@@ -23,6 +25,12 @@ type CE a = ContST Event () IO a
 data Daemon = Daemon
   { daeINotify    :: INotify
   }
+  
+catchCD :: CD () -> CD ()
+catchCD m = StateT $ \s -> do
+  E.catch (evalStateT m s) $ \(E.SomeException e) -> do
+    putStrLn $ "[*] CD exception: " ++ (show e)
+  return ((), s)
 
 forkCD :: CD () -> CD ()
 forkCD d = mapStateT (\x -> forkIO x >> return ()) d
