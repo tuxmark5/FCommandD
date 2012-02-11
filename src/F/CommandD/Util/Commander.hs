@@ -11,6 +11,8 @@ module F.CommandD.Util.Commander
 , getRunCmd
 , nextProfile
 , newCommander
+, setFocusHook
+, setSessionFilter
 , toVariant       -- dbus
 ) where
   
@@ -18,10 +20,11 @@ module F.CommandD.Util.Commander
 import            Control.Concurrent (forkIO)
 import            Control.Concurrent.MVar
 import            Control.Exception (handle)
-import            Control.Monad (forever)
-import            Control.Monad.Trans.State (StateT(..), evalStateT, gets)
+import            Control.Monad (forever, when)
+import            Control.Monad.Trans.State (StateT(..), evalStateT, gets, modify)
 import            Data.ByteString.Char8 (ByteString)
 import qualified  Data.ByteString.Char8 as B
+import            Data.IORef
 import            Data.Maybe (fromJust)
 import            Data.Text.Encoding (decodeUtf8)
 import            DBus.Address
@@ -43,7 +46,8 @@ import            System.Posix.Env (setEnv)
 type CmdM a = StateT Commander IO a
 
 data Commander = Commander
-  { cmdHub        :: Sink HubFilter
+  { cmdFocusHook  :: FocusEvent -> IO ()
+  , cmdHub        :: Sink HubFilter
   , cmdProcObs    :: ProcessObserver
   , cmdProfId     :: Session -> IO ByteString
   , cmdProfiles   :: MVar [Profile]
@@ -53,20 +57,24 @@ data Commander = Commander
   }
   
 data Profile = Profile
-  { prSession     :: Maybe Session
-  , prClient      :: Maybe Client
+  { prClient      :: Maybe Client
+  , prFocus       :: IORef FocusEvent
   , prName        :: ByteString
+  , prSession     :: Maybe Session
   , prSink        :: Maybe SinkA
   , prTrigger     :: Profile -> IO ()
   }
+  
+instance Eq Profile where
+  a == b = prName a == prName b
 
 {- ########################################################################################## -}
 
 addSink :: SinkC s => ByteString -> (Sink s) -> CmdM ()
-addSink name (Sink sink) = gets cmdProfiles >>= \pv -> do
-  list <- lift $ takeMVar pv
-  let pr = (newProfile name) { prSink = Just (SinkA sink) }
-  lift $ putMVar pv (list ++ [pr])
+addSink name (Sink sink) = gets cmdProfiles >>= \pv -> lift $ do
+  list <- takeMVar pv
+  pr   <- newProfile name (Just $ SinkA sink)
+  putMVar pv (list ++ [pr])
 
 getCallCmd :: Commander -> CD (MethodCall -> CD ())
 getCallCmd cmd = return $ \c -> lift $ do
@@ -84,6 +92,12 @@ getRunCmd cmd = return $ \app args -> withSession cmd $ \ses -> lift $ let
 nextProfile :: Commander -> CD ()
 nextProfile cmd = lift $ modifyProfiles cmd $ \(a:r) -> r ++ [a]
 
+setFocusHook :: (FocusEvent -> IO ()) -> CmdM ()
+setFocusHook hook = modify $ \s -> s { cmdFocusHook = hook }
+
+setSessionFilter :: (ByteString -> Bool) -> CmdM ()
+setSessionFilter filt = modify $ \s -> s { cmdSesFilter = filt }
+
 withSession :: Commander -> (Session -> CD ()) -> CD ()
 withSession cmd m = do
   p <- lift $ getFirstProfile cmd
@@ -96,10 +110,15 @@ withSession cmd m = do
 getFirstProfile :: Commander -> IO Profile
 getFirstProfile cmd = readMVar (cmdProfiles cmd) >>= return . head
 
-loopFocus :: Commander -> ChanI FocusEvent -> IO ()
-loopFocus cmd cf = forever $ do
-  e <- readChan cf
-  putStrLn $ show e
+isActiveProfile :: Commander -> Profile -> IO Bool
+isActiveProfile cmd p = getFirstProfile cmd >>= return . (== p)
+
+loopFocus :: Commander -> Profile -> ChanI FocusEvent -> IO ()
+loopFocus cmd p fc = do
+  e <- readChan fc
+  case e of
+    FocusChanged {} -> onFocusChanged cmd p e >> loopFocus cmd p fc
+    FocusDestroyed  -> return ()
 
 loopSession :: Commander -> IO ()
 loopSession cmd = forever $ do
@@ -108,48 +127,12 @@ loopSession cmd = forever $ do
     SessionCreated    ses -> onSessionCreated cmd ses
     SessionDestroyed  ses -> onSessionDestroyed cmd ses
 
-newCommander :: (Session -> IO ByteString) -> CmdM () -> CD (Commander, Sink HubFilter)
-newCommander profId m = do
-  inotify     <- gets daeINotify
-  (pobs, pc)  <- lift $ newProcessObserver inotify
-  (sobs, sc)  <- lift $ newSessionObserver pc ["dwm", "fmonad", "xfce4-session"] 
-  hub         <- newHub
-  proVar      <- lift $ newMVar []
-  
-  let cmd = Commander { 
-      cmdHub        = hub
-    , cmdProcObs    = pobs
-    , cmdProfId     = profId
-    , cmdProfiles   = proVar
-    , cmdSesChan    = sc
-    , cmdSesFilter  = \s -> any (== s) ["dwm", "xfce4-session"] 
-    , cmdSesObs     = sobs
-    }
-    
-  (_, cmd1)     <- lift $ runStateT m cmd
-  profile0      <- lift $ getFirstProfile cmd
-  lift $ case prSink profile0 of
-    (Just (SinkA s))  -> hubSetSink hub (Sink s)
-    otherwise         -> return ()
-  
-  lift $ forkIO $ loopSession cmd1
-  return (cmd1, hub)
-  
-newProfile :: ByteString -> Profile
-newProfile name = Profile
-  { prSession   = Nothing
-  , prClient    = Nothing
-  , prName      = name
-  , prSink      = Nothing
-  , prTrigger   = \_ -> return ()
-  }
-  
-modifyProfile :: Commander -> ByteString -> (Profile -> Profile) -> IO ()
-modifyProfile cmd name mod = modifyMVar_ (cmdProfiles cmd) $ \pr0 -> return $ let
-  mod' p = if prName p == name 
-    then (Just $ mod p) 
-    else Nothing
-  in replaceOne mod' (newProfile name) pr0
+modifyProfile :: Commander -> ByteString -> (Profile -> Profile) -> IO Profile
+modifyProfile cmd name mod = modifyMVar (cmdProfiles cmd) $ \pr0 -> do
+  let filt p        = prName p == name
+      mod' (Just p) = return $ mod p
+      mod' Nothing  = newProfile name Nothing
+  replaceOne filt mod' pr0
 
 modifyProfiles :: Commander -> ([Profile] -> [Profile]) -> IO ()
 modifyProfiles cmd mod = modifyMVar_ (cmdProfiles cmd) $ \p0 -> do
@@ -158,29 +141,88 @@ modifyProfiles cmd mod = modifyMVar_ (cmdProfiles cmd) $ \p0 -> do
     (Just (SinkA s))  -> hubSetSink (cmdHub cmd) (Sink s)
     otherwise         -> return ()
   return p1
+
+newCommander :: (Session -> IO ByteString) -> CmdM () -> CD (Commander, Sink HubFilter)
+newCommander profId m = do    
+  hub         <- newHub
+  proVar      <- lift $ newMVar []  
   
+  let cmd0 = Commander {
+      cmdFocusHook  = \_ -> return ()  
+    , cmdHub        = hub
+    , cmdProcObs    = undefined
+    , cmdProfId     = profId
+    , cmdProfiles   = proVar
+    , cmdSesChan    = undefined
+    , cmdSesFilter  = \s -> any (== s) ["dwm", "fmonad", "xfce4-session"] 
+    , cmdSesObs     = undefined
+    }
+
+  (_, cmd1)   <- lift $ runStateT m cmd0
+  inotify     <- gets daeINotify
+  (pobs, pc)  <- lift $ newProcessObserver inotify
+  (sobs, sc)  <- lift $ newSessionObserver pc $ cmdSesFilter cmd1
+
+  let cmd2 = cmd1 {
+      cmdProcObs    = pobs
+    , cmdSesChan    = sc
+    , cmdSesObs     = sobs
+    }
+  
+  profile0      <- lift $ getFirstProfile cmd2
+  lift $ case prSink profile0 of
+    (Just (SinkA s))  -> hubSetSink hub (Sink s)
+    otherwise         -> return ()
+  
+  lift $ forkIO $ loopSession cmd2
+  return (cmd2, hub)
+  
+newProfile :: ByteString -> Maybe SinkA -> IO Profile
+newProfile name sink = do
+  focus <- newIORef newFocusEvent
+  return Profile
+    { prClient      = Nothing
+    , prFocus       = focus
+    , prName        = name
+    , prSession     = Nothing
+    , prSink        = sink
+    , prTrigger     = \_ -> return ()
+    }
+    
+onFocusChanged :: Commander -> Profile -> FocusEvent -> IO ()
+onFocusChanged cmd pr fe = do
+  writeIORef (prFocus pr) fe
+  active <- isActiveProfile cmd pr
+  when active $ cmdFocusHook cmd fe
+
 onSessionCreated :: Commander -> Session -> IO ()
 onSessionCreated cmd ses = do
-  putStrLn $ show $ sesDisplay ses
-  -- Start the FocusObserver
-  setEnv "XAUTHORITY" (B.unpack $ sesXAuthority ses) True
-  (fobs, fc)    <- newFocusObserver $ sesDisplay ses
-  forkIO $ loopFocus cmd fc
-  
+  putStrLn $ show $ sesDisplay ses  
   -- Connect to DBus
   let (Just ad)  = addresses $ decodeUtf8 $ sesAddress ses
   client        <- connectFirst ad
   
   -- Update profile
   name          <- cmdProfId cmd ses
-  modifyProfile cmd name $ \p0 -> p0
-    { prSession = Just ses
-    , prClient  = client
-    }
+  profile       <- modifyProfile cmd name $ \p0 -> p0
+    { prClient  = client
+    , prSession = Just ses    
+    }    
+    
+  -- Connect to X
+  startFocusObserver cmd profile
   
 onSessionDestroyed :: Commander -> Session -> IO ()
 onSessionDestroyed cmd ses = do
   putStrLn $ "[-] Session destroyed: " ++ (show $ sesDisplay ses)
+  
+startFocusObserver :: Commander -> Profile -> IO ()
+startFocusObserver cmd pr = do
+  let ses = fromJust $ prSession pr
+  setEnv "XAUTHORITY" (B.unpack $ sesXAuthority ses) True
+  (_, fc) <- newFocusObserver $ sesDisplay ses
+  forkIO $ loopFocus cmd pr fc
+  return ()
   
 {- ########################################################################################## -}
   
@@ -191,10 +233,10 @@ connectFirst addrs = loop addrs where
     putStrLn $ "[DBUS] Connecting " ++ (show a)
     connect a >>= return . Just
 
-replaceOne :: (a -> Maybe a) -> a -> [a] -> [a]
-replaceOne _ d [      ] = [d]
-replaceOne p d (a:rest) = case p a of
-  Just a' -> a':rest
-  Nothing ->  a:replaceOne p d rest
+replaceOne :: (a -> Bool) -> (Maybe a -> IO a) -> [a] -> IO ([a], a)
+replaceOne _    rep [      ] = rep Nothing >>= \p -> return $ ([p], p)
+replaceOne pred rep (a:rest) = case pred a of
+  True    -> rep (Just a)             >>= \a'     -> return (a':rest, a')
+  False   -> replaceOne pred rep rest >>= \(l, r) -> return ( a:l,    r)
 
 {- ########################################################################################## -}

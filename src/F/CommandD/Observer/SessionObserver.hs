@@ -52,8 +52,8 @@ data SessionEvent
 
 data SessionObserver = SessionObserver
   { soChan              :: ChanO SessionEvent
-  , soProcs             :: [ByteString]
   , soProcChan          :: ChanI ProcessEvent
+  , soSessionFilter     :: ByteString -> Bool
   , soSessions          :: IORef (Map Int Session)
   }
 
@@ -110,10 +110,10 @@ handleProcessDestroyed pid = ask >>= \obs -> do
     Nothing     -> return ()
       
 matchSession :: Int -> SesM Bool
-matchSession pid = asks soProcs >>= \procs -> lift $ do
+matchSession pid = ask >>= \s -> lift $ do
   line <- getProcCmdLine pid
   return $ case line of
-    cmd:_     -> any (== cmd) procs
+    cmd:_     -> soSessionFilter s cmd
     otherwise -> False
     
 modifySessions :: (Map Int Session -> (Map Int Session, a)) -> SesM a
@@ -140,11 +140,11 @@ newSession = Session
   , sesXAuthority   = ""
   } 
 
-newSessionObserver :: ChanI ProcessEvent -> [ByteString] -> IO (SessionObserver, ChanI SessionEvent)
-newSessionObserver pchan procs = do
+newSessionObserver :: ChanI ProcessEvent -> (ByteString -> Bool) -> IO (SessionObserver, ChanI SessionEvent)
+newSessionObserver pchan sfilt = do
   (chanI, chanO)  <- newChan
   sessions        <- newIORef M.empty
-  let so = SessionObserver chanO procs pchan sessions
+  let so = SessionObserver chanO pchan sfilt sessions
   forkIO $ runReaderT monitorLoop so
   return (so, chanI)
   

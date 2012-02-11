@@ -4,6 +4,7 @@
 module F.CommandD.Observer.FocusObserver
 ( FocusEvent(..)
 , FocusObserver(..)
+, newFocusEvent
 , newFocusObserver
 ) where
   
@@ -14,9 +15,11 @@ import            Control.Monad (forever, forM_, when)
 import            Control.Monad.Trans.Reader 
 import            Data.Bits
 import            Data.ByteString.Char8 (ByteString)
+import qualified  Data.ByteString as BW
 import qualified  Data.ByteString.Char8 as B
 import            Data.IORef
 import            Data.Maybe
+import            Data.Word (Word32)
 import            F.CommandD.Chan
 import qualified  Graphics.XHB as X
 import            Graphics.XHB.Connection
@@ -24,12 +27,15 @@ import            Graphics.XHB.High.Xproto
 import            System.IO
 {- ########################################################################################## -}
 
-data FocusEvent = FocusEvent
-  { feClass                 :: ByteString
+data FocusEvent 
+  = FocusChanged
+  { feClass                 :: [ByteString]
   , feCommand               :: [ByteString]
   , feName                  :: ByteString
   , feWindow                :: Window
-  } deriving (Show)
+  } 
+  | FocusDestroyed
+  deriving (Show)
 
 data FocusObserver = FocusObserver
   { foActiveWindow          :: IORef Window 
@@ -62,9 +68,10 @@ getActiveWindow s = getProperty (foConnection s) (foRootWindow s) (foAtomNetActi
 
 handleEvent :: FocusObserver -> X.PropertyNotifyEvent -> IO ()
 handleEvent s e | X.atom_PropertyNotifyEvent e == foAtomNetActiveWindow s = do
-  actW <- getActiveWindow s
-  case actW of
-    Just w      -> writeFocusEvent s w 
+  actW0  <- readIORef $ foActiveWindow s 
+  actW1  <- getActiveWindow s
+  case actW1 of
+    Just w      -> when (w /= actW0) $ writeFocusEvent s w 
     otherwise   -> return ()
 handleEvent _ _ = return ()
 
@@ -77,6 +84,14 @@ mainLoop s = do
   case fromEvent evt of
     Just e    -> handleEvent s e >> mainLoop s
     Nothing   -> return ()
+
+newFocusEvent :: FocusEvent
+newFocusEvent = FocusChanged
+  { feClass   = []
+  , feCommand = []
+  , feName    = ""
+  , feWindow  = X.fromXid $ X.toXid (0 :: Word32)
+  }
 
 newFocusObserver :: ByteString -> IO (FocusObserver, ChanI FocusEvent)
 newFocusObserver dpy' = do
@@ -108,14 +123,27 @@ newFocusObserver dpy' = do
 
 writeFocusEvent :: FocusObserver -> Window -> IO ()
 writeFocusEvent s w = do
+  writeIORef (foActiveWindow s) w
   cls <- getProp foAtomWMClass
       <| return ""
   cmd <- getProp foAtomWMCommand
-      <| return "?"
-  nam <- getProp foAtomNetWMName
-      <| getProp foAtomWMName
       <| return ""
-  writeChan (foChan s) $ FocusEvent cls [cmd] nam w
+  nam <- getProp foAtomWMName
+      <| getProp foAtomNetWMName
+      <| return ""
+  writeChan (foChan s) $ FocusChanged 
+    { feClass   = splitString cls 
+    , feCommand = splitString cmd 
+    , feName    = nam 
+    , feWindow  = w
+    } 
   where getProp acc = getProperty (foConnection s) w (acc s)
-  
+
+ {- ########################################################################################## -}
+
+splitString :: ByteString -> [ByteString]
+splitString s | B.null s  = []
+              | otherwise = a:(splitString $ B.drop 1 rest)
+  where (a, rest) = BW.breakByte 0 s
+
 {- ########################################################################################## -}

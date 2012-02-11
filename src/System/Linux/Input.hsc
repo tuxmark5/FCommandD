@@ -78,6 +78,7 @@ module System.Linux.Input
 , evFF
 , evPWR
 , evFFStatus
+, getTimeOfDay  -- extra
 , inputGrab
 , inputRead
 , inputWrite
@@ -200,6 +201,14 @@ toTimeval d = Timeval
   { timevalSec        = fromIntegral $ c'timeval'tv_sec d
   , timevalUSec       = fromIntegral $ c'timeval'tv_usec d
   }
+  
+foreign import ccall "sys/time.h gettimeofday"
+  getTimeOfDay' :: Ptr C'timeval -> Ptr () -> IO CInt
+                                      
+getTimeOfDay :: IO Timeval
+getTimeOfDay = alloca $ \p -> do
+  getTimeOfDay' p nullPtr 
+  peek p >>= return . toTimeval 
 
 {- ########################################################################################## -}
   

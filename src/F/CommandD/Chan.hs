@@ -3,6 +3,7 @@ module F.CommandD.Chan
 , ChanO
 , dupChanI
 , newChan
+, newChanO
 , readChan
 , writeChan
 ) where
@@ -31,6 +32,13 @@ newChan = do
   readVar   <- newMVar hole
   writeVar  <- newMVar hole
   return (ChanI readVar, ChanO writeVar)
+
+newChanO :: IO (ChanO a)
+newChanO = do
+  hole      <- newEmptyMVar  
+  writeVar  <- newMVar hole
+  return (ChanO writeVar)
+
 
 readChan :: ChanI a -> IO a
 readChan (ChanI readVar) = do

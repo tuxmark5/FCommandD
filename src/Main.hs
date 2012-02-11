@@ -28,6 +28,7 @@ import qualified  Data.ByteString.Char8 as B
 import            F.CommandD.Observer.SessionObserver
 
 import            F.CommandD.Observer.FocusObserver
+import            F.CommandD.Source.VirtualSource
 
 -- TODO: EVDev hotplug
 -- TOOD: Session termination
@@ -130,18 +131,23 @@ main = daemon $ do
   evdev       <- mkEVDevSourceDyn mdev
   uinput0     <- mkUInputSink "UInput: Primary"
   uinput1     <- mkUInputSink "UInput: DisplayLink"
-  macro       <- mkMacroFilter
+  macro       <- newMacroFilter
   debug       <- mkDebugFilter
   
   (cmd, hub)  <- newCommander sesId $ do
     addSink "Main"  uinput0
     addSink "Dl"    uinput1
+    setFocusHook $ \fe -> putStrLn $ "FF! " ++ (show fe)
 
   call        <- getCallCmd cmd
   run         <- getRunCmd cmd
   
   runMode macro $ do
     registerKeys
+    command "+N1" $ runMacro hub $ hold keyRightAlt $ downUp keyLeft
+    command "+N3" $ runMacro hub $ hold keyRightAlt $ downUp keyRight
+    command "+N4" $ enableMode macro ["apps"] True
+    command "+N5" $ enableMode macro ["apps"] False
     command "+N6" $ nextProfile cmd
     mode "apps"         $ modeApps run
     mode "guayadeque"   $ modeGuayadeque call

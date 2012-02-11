@@ -22,11 +22,12 @@ import qualified  Data.ByteString.Char8 as B
 import            Data.Int (Int32)
 import            Data.Map (Map)
 import qualified  Data.Map as M
+import            Data.Word (Word16)
 import            System.Linux.Keys
 {- ########################################################################################## -}
 
 data Key  = Key
-  { keyCode       :: !Int32
+  { keyCode       :: !Word16
   , keyDevice     :: !Int32
   , keyFlag       :: !Int32
   } 
@@ -53,7 +54,7 @@ addDev :: KeyMap -> ByteString -> Int32 -> KeyMap
 addDev kmap name dev = kmap
   { keyMapDevices = M.insert name dev (keyMapDevices kmap) }  
     
-addKey :: KeyMap -> ByteString -> Int32 -> Int32 -> KeyMap
+addKey :: KeyMap -> ByteString -> Int32 -> Word16 -> KeyMap
 addKey kmap name dev key = kmap
   { keyMapKeys = M.insert name k (keyMapKeys kmap) } where 
   k = Key
@@ -90,7 +91,7 @@ lookupDevKey' kmap dev key = lookupDevKey kmap (B.pack dev) (B.pack key)
 lookupKey :: KeyMap -> ByteString -> Maybe Key
 lookupKey kmap key = M.lookup key $ keyMapKeys kmap
 
-mkKeyMap :: [(ByteString, Int32)] -> [(ByteString, Int32)] -> KeyMap
+mkKeyMap :: [(ByteString, Int32)] -> [(ByteString, Word16)] -> KeyMap
 mkKeyMap devs keys = KeyMap
   { keyMapDevices = M.fromList devs
   , keyMapKeys    = M.fromList $ map (\(n, i) -> (n, Key i 0 0)) keys
@@ -106,7 +107,7 @@ defaultDevices =
 
 {- ########################################################################################## -}
 
-defaultKeys :: [(ByteString, Int32)]
+defaultKeys :: [(ByteString, Word16)]
 defaultKeys =
   [ ("@0",                  btn0                )
   , ("@1",                  btn1                )
