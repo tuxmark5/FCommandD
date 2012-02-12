@@ -1,10 +1,6 @@
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE UndecidableInstances #-}
-{-# LANGUAGE TypeSynonymInstances #-}
 {-# LANGUAGE OverloadedStrings #-}
 
-import            Control.Concurrent (forkIO, threadDelay)
+import            Control.Concurrent (threadDelay)
 import            Control.Monad (forever, forM_, when)
 import qualified  Data.ByteString.Char8 as B
 import            F.CommandD.Daemon
@@ -23,12 +19,14 @@ import            System.IO
   * add dbus policy for root
 
   TODO:
+  * manual mode override with suspended switcher / toggle
   * run outside session
+  * commander: handle session destruction
 
   * evdev hotplug/reload
   * parse UID from environment
   * TCP source/sink
-  
+
 -}
 
 {- ########################################################################################## -}
@@ -73,7 +71,7 @@ registerKeys = do
   
 -- mode to launch applications
 modeApps :: ModeM Commander ()
-modeApps = do
+modeApps = mode "apps" $ do
   command "*LeftAlt+F2"       $ run "`dmenu_path | dmenu -b`"
   command "*Super+B"          $ run "VirtualBox"
   command "*Super+C"          $ run "urxvt -e python"
@@ -89,7 +87,7 @@ modeApps = do
 
 -- mode to control Guayadeque via DBus
 modeGuayadeque :: ModeM Commander ()
-modeGuayadeque = do
+modeGuayadeque = mode "guayadeque" $ do
   command "+NextSong"         $ gdqNext
   command "+PlayPause"        $ gdqPlayPause
   command "+PreviousSong"     $ gdqPrev
@@ -99,9 +97,14 @@ modeGuayadeque = do
   command "*Hyper+N11"        $ gdqPlayPause
   command "*Hyper+N12"        $ gdqNext
 
+modeVolume :: ModeM Commander ()
+modeVolume = mode "volume" $ do
+  command "*Hyper+WheelDown:N"  $ downUp keyVolumeDown
+  command "*Hyper+WheelUp:N"    $ downUp keyVolumeUp
+
 -- mode to control XMonad via DBus
 modeXMonad :: ModeM Commander ()
-modeXMonad = do
+modeXMonad = mode "xmonad" $ do
   command "*Hyper+Z"          $ xmonadCoreExit
   command "*Hyper+X"          $ xmonadCoreRestart
   command "*Hyper+H"          $ xmonadCoreSetWMName "L3GD"
@@ -141,8 +144,10 @@ modeXMonad = do
 
 fastMouseWheel :: ModeM Commander ()
 fastMouseWheel = do
-  command "+WheelDown:N"      $ rel relWheel (-5)
-  command "+WheelUp:N"        $ rel relWheel ( 5)
+  command "+WheelDown:N"          $ rel relWheel (-5)
+  command "+WheelUp:N"            $ rel relWheel ( 5)
+  command "*LeftCtrl+WheelDown:N" $ rel relWheel (-10)
+  command "*LeftCtrl+WheelUp:N"   $ rel relWheel ( 10)
 
 modeDefault :: ModeM Commander ()
 modeDefault = mode "default" $ do
@@ -164,9 +169,14 @@ modeKrusader :: ModeM Commander ()
 modeKrusader = mode "krusader" $ do
   return ()
 
+modeLibreOfficeWriter :: ModeM Commander ()
+modeLibreOfficeWriter = mode "lowriter" $ do
+  command "+N1"               $ hold keyLeftCtrl $ downUp keyB
+
 modeMPlayer :: ModeM Commander ()
 modeMPlayer = mode "mplayer" $ do
-  return ()
+  command "+WheelDown:N"      $ downUp keyVolumeDown
+  command "+WheelUp:N"        $ downUp keyVolumeUp
 
 modeOpera :: ModeM Commander ()
 modeOpera = mode "opera" $ do
@@ -189,20 +199,19 @@ modeXTerm = mode "xterm" $ do
 
 switcher :: (ByteString -> IO ()) -> WinM ()
 switcher set = do
-  mClass1 "Firefox"     $ set "firefox"
-  mClass0 "gedit"       $ set "gedit"
-  mClass0 "krusader"    $ set "krusader"
-  mClass1 "MPlayer"     $ set "mplayer"
-  mClass0 "opera"       $ set "opera"  -- CHECK THIS
-  mClass0 "sublime"     $ set "sublime"
-  mClass0 "vmware"      $ set "vmware"
-  mClass0 "xterm"       $ set "xterm"
-  mName "Event Tester"  $ set "xterm"
-  mAny                  $ set "default"
+  mClass1 "Firefox"             $ set "firefox"
+  mClass0 "gedit"               $ set "gedit"
+  mClass0 "krusader"            $ set "krusader"
+  mClass1 "libreoffice-writer"  $ set "lowriter"
+  mClass1 "MPlayer"             $ set "mplayer"
+  mClass0 "opera"               $ set "opera"  -- CHECK THIS
+  mClass0 "sublime"             $ set "sublime"
+  mClass0 "vmware"              $ set "vmware"
+  mClass0 "xterm"               $ set "xterm"
+  mName "Event Tester"          $ set "xterm"
+  mAny                          $ set "default"
 
 {- ########################################################################################## -}
-
--- toggle suspend mode
 
 main :: IO ()
 main = daemon $ do
@@ -223,15 +232,17 @@ main = daemon $ do
     command "*FN+Compose" $ nextProfile cmd
 
     mode "global" $ do
-      mode "apps"         $ modeApps
-      mode "guayadeque"   $ modeGuayadeque
-      mode "xmonad"       $ modeXMonad
+      modeApps
+      modeGuayadeque
+      modeVolume
+      modeXMonad
 
     mode "local" $ do
       modeDefault
       modeFirefox
       modeGEdit
       modeKrusader
+      modeLibreOfficeWriter
       modeMPlayer
       modeOpera
       modeSublime
