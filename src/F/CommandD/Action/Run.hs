@@ -21,7 +21,7 @@ runAs mon sesName cmd = do
     
 runInSession :: Session -> CUid -> FilePath -> [String] -> IO ()
 runInSession ses uid cmd args = do
-  forkProcess $ do
+  pid0 <- forkProcess $ do
     createSession
     pid <- forkProcess $ do
       -- setUserID uid
@@ -29,6 +29,7 @@ runInSession ses uid cmd args = do
       executeFile cmd True args $ Just $ getEnvironmentPairs ses
     createProcessGroupFor pid
     exitImmediately ExitSuccess
+  getProcessStatus True True pid0 -- prevent defunct process
   return ()
   
 runInShell :: Session -> CUid -> String -> IO ()

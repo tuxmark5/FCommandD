@@ -4,7 +4,7 @@ module F.CommandD.Source.EVDevSource
 ) where
 
 {- ########################################################################################## -}
-import            F.CommandD.Daemon
+import            F.CommandD.Core
 import            F.CommandD.Source
 import            System.Linux.Input (inputGrab, inputRead)
 import            System.Posix.IO (FdOption(..), OpenMode(..), defaultFileFlags, openFd, setFdOption)

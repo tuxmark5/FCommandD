@@ -8,8 +8,7 @@ module F.CommandD.Sink.UInputSink
 {- ########################################################################################## -}
 import Control.Monad (forM_)
 import Data.Word (Word16)
-import F.CommandD.ContST
-import F.CommandD.Daemon
+import F.CommandD.Core
 import F.CommandD.Sink
 import System.Linux.Input
 import System.Linux.UInput

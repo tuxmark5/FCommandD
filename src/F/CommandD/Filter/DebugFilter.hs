@@ -4,8 +4,7 @@ module F.CommandD.Filter.DebugFilter
 ) where
 
 {- ########################################################################################## -}
-import F.CommandD.ContST
-import F.CommandD.Daemon
+import F.CommandD.Core
 import F.CommandD.Filter
 import System.IO
 {- ########################################################################################## -}

@@ -11,10 +11,12 @@ module F.CommandD.Action.XMonad
 , xmonadMasterMod
 , xmonadMasterSwap
 , xmonadNavGridSelect
+, xmonadNavMove
 , xmonadScreenMoveWin
 , xmonadScreenNext
 , xmonadScreenSetCurr
 , xmonadScreenSwapNext
+, xmonadTabMerge
 , xmonadTabNext
 , xmonadTabPrev
 , xmonadTabUnmerge
@@ -44,10 +46,12 @@ xmonadMasterFocus       :: MethodCall
 xmonadMasterMod         :: Int32 -> MethodCall
 xmonadMasterSwap        :: MethodCall
 xmonadNavGridSelect     :: MethodCall
+xmonadNavMove           :: Int32 -> MethodCall
 xmonadScreenMoveWin     :: Int32 -> MethodCall
 xmonadScreenNext        :: MethodCall
 xmonadScreenSetCurr     :: Int32 -> MethodCall
 xmonadScreenSwapNext    :: MethodCall
+xmonadTabMerge          :: Int32 -> MethodCall
 xmonadTabNext           :: MethodCall
 xmonadTabPrev           :: MethodCall
 xmonadTabUnmerge        :: MethodCall
@@ -68,11 +72,13 @@ xmonadMasterFocus       = xcall "f.xmonad.master" "focus"       []
 xmonadMasterMod d       = xcall "f.xmonad.master" "mod"         [toVariant d]
 xmonadMasterSwap        = xcall "f.xmonad.master" "swap"        []
 xmonadNavGridSelect     = xcall "f.xmonad.nav"    "gridSelect"  []
+xmonadNavMove d         = xcall "f.xmonad.nav"    "move"        [toVariant d] -- NN
 xmonadScreenMoveWin s   = xcall "f.xmonad.screen" "moveWin"     [toVariant s]
 xmonadScreenNext        = xcall "f.xmonad.screen" "next"        []
 xmonadScreenSetCurr s   = xcall "f.xmonad.screen" "setCurr"     [toVariant s]
 xmonadScreenSwapNext    = xcall "f.xmonad.screen" "swapNext"    []
-xmonadTabNext           = xcall "f.xmonad.tab"    "next"        []
+xmonadTabMerge d        = xcall "f.xmonad.tab"    "merge"       [toVariant d] -- NN
+xmonadTabNext           = xcall "f.xmonad.tab"    "next"        [] 
 xmonadTabPrev           = xcall "f.xmonad.tab"    "prev"        []
 xmonadTabUnmerge        = xcall "f.xmonad.tab"    "unmerge"     []
 xmonadWinClose          = xcall "f.xmonad.win"    "close"       []

@@ -6,12 +6,14 @@ module F.CommandD.Util.Commander
 , Commander(..)
 , MethodCall(..)  -- dbus
 , Profile(..)
+, Session(..)
 , addSink
 , getCallCmd
 , getRunCmd
 , nextProfile
 , newCommander
 , setFocusHook
+, setModeSwitcher
 , setSessionFilter
 , toVariant       -- dbus
 ) where
@@ -33,13 +35,15 @@ import            DBus.Connection (ConnectionError(..))
 import            DBus.Message (Flag(..), MethodCall(..))
 import            DBus.Types
 import            F.CommandD.Action.Run
-import            F.CommandD.Chan
-import            F.CommandD.Daemon
+import            F.CommandD.Core
 import            F.CommandD.Filter.HubFilter
+import            F.CommandD.Filter.MacroFilter
 import            F.CommandD.Observer.FocusObserver
 import            F.CommandD.Observer.ProcessObserver
 import            F.CommandD.Observer.SessionObserver
 import            F.CommandD.Sink
+import            F.CommandD.Util.Chan
+import            F.CommandD.Util.WindowMatcher
 import            System.Posix.Env (setEnv)
 {- ########################################################################################## -}
 
@@ -76,34 +80,38 @@ addSink name (Sink sink) = gets cmdProfiles >>= \pv -> lift $ do
   pr   <- newProfile name (Just $ SinkA sink)
   putMVar pv (list ++ [pr])
 
-getCallCmd :: Commander -> CD (MethodCall -> CD ())
-getCallCmd cmd = return $ \c -> lift $ do
+getCallCmd :: Commander -> CD (MethodCall -> IO ())
+getCallCmd cmd = return $ \c -> do
   p <- getFirstProfile cmd
   case prClient p of
     Just client   -> call_ client c >> return ()
     Nothing       -> B.putStrLn $ B.concat ["No client for this profile: ", prName p]
   
-getRunCmd :: Commander -> CD (String -> [String] -> CD ())
-getRunCmd cmd = return $ \app args -> withSession cmd $ \ses -> lift $ let
+getRunCmd :: Commander -> CD (String -> [String] -> IO ())
+getRunCmd cmd = return $ \app args -> withSession cmd $ \ses -> let
   run app []    = runInShell    ses 1000 app
   run app args  = runInSession  ses 1000 app args
   in run app args
   
-nextProfile :: Commander -> CD ()
-nextProfile cmd = lift $ modifyProfiles cmd $ \(a:r) -> r ++ [a]
+nextProfile :: Commander -> IO ()
+nextProfile cmd = modifyProfiles cmd $ \(a:r) -> r ++ [a]
 
 setFocusHook :: (FocusEvent -> IO ()) -> CmdM ()
 setFocusHook hook = modify $ \s -> s { cmdFocusHook = hook }
 
+setModeSwitcher :: (Sink MacroFilter) -> ((ByteString -> IO ()) -> WinM ()) -> CmdM ()
+setModeSwitcher macro sw = setFocusHook (runWinM_ (sw set)) where
+  set = enableXMode macro ["local"]
+
 setSessionFilter :: (ByteString -> Bool) -> CmdM ()
 setSessionFilter filt = modify $ \s -> s { cmdSesFilter = filt }
 
-withSession :: Commander -> (Session -> CD ()) -> CD ()
+withSession :: Commander -> (Session -> IO ()) -> IO ()
 withSession cmd m = do
-  p <- lift $ getFirstProfile cmd
+  p <- getFirstProfile cmd
   case prSession p of
     Just session  -> m session
-    Nothing       -> lift $ B.putStrLn $ B.concat ["No session for this profile: ", prName p]
+    Nothing       -> B.putStrLn $ B.concat ["No session for this profile: ", prName p]
     
 {- ########################################################################################## -}
 

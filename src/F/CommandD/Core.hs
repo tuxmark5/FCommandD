@@ -1,5 +1,6 @@
 module F.CommandD.Core
-( CD(..)
+( module F.CommandD.Util.ContST
+, CD(..)
 , CE(..)
 , Daemon(..)
 , Event(..)
@@ -14,7 +15,7 @@ import            Control.Concurrent (forkIO)
 import qualified  Control.Exception as E
 import            Control.Monad.Trans.Class (MonadTrans(..))
 import            Control.Monad.Trans.State (StateT(..), evalStateT)
-import            F.CommandD.ContST
+import            F.CommandD.Util.ContST
 import            System.INotify (INotify)
 import            System.Linux.Input (Event(..))
 {- ########################################################################################## -}

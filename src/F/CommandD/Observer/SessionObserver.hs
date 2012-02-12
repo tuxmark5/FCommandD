@@ -29,9 +29,9 @@ import            Data.List (find, lookup)
 import            Data.Maybe (fromMaybe)
 import            Data.Map (Map)
 import qualified  Data.Map as M
-import            F.CommandD.Chan
-import            F.CommandD.Daemon
+import            F.CommandD.Core
 import            F.CommandD.Observer.ProcessObserver
+import            F.CommandD.Util.Chan
 import            System.IO
 import            System.Posix.Env (setEnv)
 import            System.Posix.IO (closeFd)

@@ -1,5 +1,6 @@
 module F.CommandD.Source.VirtualSource
 ( module System.Linux.Keys
+, MacroM(..)
 , delay
 , down
 , downUp
@@ -10,12 +11,12 @@ module F.CommandD.Source.VirtualSource
 
 {- ########################################################################################## -}
 import Control.Concurrent (threadDelay)
-import Control.Monad.Trans.State
+import Control.Monad.Trans.State 
 import Data.Int  (Int32, Int64)
 import Data.Word (Word16, Word32)
-import F.CommandD.ContST (ContST(..))
-import F.CommandD.Core
+import F.CommandD.Core hiding (get)
 import F.CommandD.Sink
+import F.CommandD.Util.ContST (ContST(..))
 import System.Linux.Input
 import System.Linux.Keys
 {- ########################################################################################## -}
@@ -52,8 +53,8 @@ up k = do
   newEvent evKEY k 0 >>= sendEvent
   newSynEvent        >>= sendEvent
 
-runMacro :: SinkC c => Sink c -> MacroM a -> CD a
-runMacro (Sink s) m = lift $ runMacroM (sinkWrite s) m
+runMacro :: SinkC c => Sink c -> MacroM a -> IO a
+runMacro (Sink s) m = runMacroM (sinkWrite s) m
 
 runMacroM :: CE () -> MacroM a -> IO a
 runMacroM sink m = do

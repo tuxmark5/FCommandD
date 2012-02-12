@@ -8,6 +8,7 @@ module F.CommandD.Filter.MacroFilter
 , aliasKey
 , command
 , enableMode
+, enableXMode
 , newMacroFilter
 , mode
 , runMode
@@ -24,8 +25,7 @@ import qualified  Data.ByteString.Char8 as B
 import            Data.Int (Int32)
 import            Data.List (find, partition)
 import            Data.IORef
-import            F.CommandD.ContST
-import            F.CommandD.Daemon
+import            F.CommandD.Core
 import            F.CommandD.Filter
 import            F.CommandD.Filter.MacroParser
 import            F.CommandD.Sink
@@ -37,7 +37,7 @@ import            System.Linux.Input
 type MacroFilter = MVar MacroFilterS
   
 data MacroFilterS = MacroFilterS
-  { mfsActions      :: [CD ()] 
+  { mfsActions      :: [IO ()] 
   , mfsFilteredKeys :: [Key]
   , mfsKeyMap       :: KeyMap
   , mfsModes        :: [Mode]
@@ -69,10 +69,10 @@ data Mode = Mode
 type ModeM a  = StateT ModeS  IO a 
 data ModeS    = ModeS KeyMap Mode
 
-addMacro :: Mode -> CD () -> [Key] -> Mode
+addMacro :: Mode -> IO () -> [Key] -> Mode
 addMacro m0 act combo = m0 { modeRootNode = addMacro' (modeRootNode m0) act combo }
 
-addMacro' :: Node -> CD () -> [Key] -> Node
+addMacro' :: Node -> IO () -> [Key] -> Node
 addMacro' n0 act []           = n0 { nodeAction   = Just act }
 addMacro' n0 act (first:rest) = n0 { nodeChildren = alter f test (nodeChildren n0) }
   where f (Just n)    = addMacro' n  act rest
@@ -90,12 +90,16 @@ collectModes mode = do
     then mapM collectModes (modeChildren mode) >>= return . (mode:) . concat
     else return []
 
-enableMode :: Sink MacroFilter -> [ByteString] -> Bool -> CD ()
-enableMode (Sink mf) name e = lift $ modifyMVar_ mf $ \s -> do 
-  case findMode (mfsRootMode s) name of
-    Just mode -> writeIORef (modeEnabled mode) e >> resetModes' s
-    Nothing   -> return s
-    
+enableMode :: Sink MacroFilter -> [ByteString] -> Bool -> IO ()
+enableMode mf name e = withMode mf name $ \m -> writeIORef (modeEnabled m) e
+
+enableMode' :: Mode -> Bool -> IO ()
+enableMode' m e = writeIORef (modeEnabled m) e
+
+enableXMode :: Sink MacroFilter -> [ByteString] -> ByteString -> IO ()
+enableXMode mf path name = withMode mf path $ \mode -> do
+  forM_ (modeChildren mode) $ \m -> enableMode' m (modeName m == name)
+
 resetModes' :: MacroFilterS -> IO MacroFilterS
 resetModes' s = do
   modes <- collectModes (mfsRootMode s)
@@ -147,10 +151,16 @@ printMode i mode = do
   forM_ (modeChildren mode) $ printMode (i + 1)
   printNode (i + 1) (modeRootNode mode)
 
+withMode :: Filter MacroFilter -> [ByteString] -> (Mode -> IO ()) -> IO ()
+withMode (Sink mf) path m = modifyMVar_ mf $ \s -> do 
+  case findMode (mfsRootMode s) path of
+    Just mode -> m mode >> resetModes' s
+    Nothing   -> return s
+
 {- ########################################################################################## -}
 
 data Node = Node
-  { nodeAction    :: Maybe (CD ())
+  { nodeAction    :: Maybe (IO ())
   , nodeChildren  :: [Node]
   , nodeKey       :: Key
   }
@@ -218,7 +228,7 @@ resetNodes = do
 --type MacroM a = State MacroFilterS a
 type MacroM a = StateT MacroFilterS IO a
 
-appendAction :: CD () -> MacroM ()
+appendAction :: IO () -> MacroM ()
 appendAction action = S.modify $ \s -> s { mfsActions = action:(mfsActions s) }
 
 appendEvent :: Event -> CE ()
@@ -275,9 +285,7 @@ runMacroM :: MacroFilter -> MacroM a -> CE a
 runMacroM var m = lift $ modifyMVar var $ \state0 -> do
   --let (r, state1)  = S.runState m state0
   (r, state1)     <- S.runStateT m state0
-  forM_ (mfsActions state1) $ \act -> forkIO $ do
-    (_, _) <- runStateT act Daemon { } -- FIX!!
-    return ()
+  forM_ (mfsActions state1) $ \act -> forkIO $ act
   return (state1 { mfsActions = [] }, r)
   
 supressEvent :: MacroFilter -> CE ()
@@ -317,7 +325,7 @@ aliasKey key0 dev1 key1 = S.get >>= \(ModeS kmap mode) -> do
     (Just d,  Just k) -> S.put $ ModeS (addKey kmap key1 d (keyCode k)) (mode)
     (d,       k     ) -> lift $ putStrLn $ concat ["[ERROR] Invalid key alias", show d, show k]
 
-command :: String -> CD () -> ModeM ()
+command :: String -> IO () -> ModeM ()
 command combo action = S.get >>= \(ModeS kmap mode0) -> do 
   case parseMacro kmap combo of
     Left  err -> lift $ putStrLn err

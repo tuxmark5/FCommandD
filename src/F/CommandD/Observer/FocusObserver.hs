@@ -20,7 +20,7 @@ import qualified  Data.ByteString.Char8 as B
 import            Data.IORef
 import            Data.Maybe
 import            Data.Word (Word32)
-import            F.CommandD.Chan
+import            F.CommandD.Util.Chan
 import qualified  Graphics.XHB as X
 import            Graphics.XHB.Connection
 import            Graphics.XHB.High.Xproto

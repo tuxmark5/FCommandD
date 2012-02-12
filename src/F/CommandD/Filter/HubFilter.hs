@@ -10,10 +10,10 @@ module F.CommandD.Filter.HubFilter
 {- ########################################################################################## -}
 import Data.IORef
 import Data.Maybe
-import F.CommandD.ContST
-import F.CommandD.Daemon
+import F.CommandD.Core
 import F.CommandD.Filter
 import F.CommandD.Sink
+import F.CommandD.Util.ContST
 {- ########################################################################################## -}
 
 data HubFilter = HubFilter (IORef (Maybe SinkA))

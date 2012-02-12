@@ -10,7 +10,7 @@ import            Control.Monad (filterM, forM_)
 import            Data.ByteString (readFile)
 import            Data.ByteString.Lex.Integral
 import            Data.Word (Word16)
-import            F.CommandD.Daemon
+import            F.CommandD.Core
 import            F.CommandD.Source
 import            F.CommandD.Source.EVDevSource
 import            F.CommandD.Util.Directory (mapDir)

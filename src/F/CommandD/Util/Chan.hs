@@ -1,4 +1,4 @@
-module F.CommandD.Chan
+module F.CommandD.Util.Chan
 ( ChanI
 , ChanO
 , dupChanI

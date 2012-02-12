@@ -20,7 +20,7 @@ import            Data.ByteString (ByteString)
 import qualified  Data.ByteString as B
 import            Data.IORef
 import            Data.List (sort)
-import            F.CommandD.Chan
+import            F.CommandD.Util.Chan
 import            F.CommandD.Util.Directory
 import            System.INotify hiding (Event)
 import qualified  System.INotify as I
