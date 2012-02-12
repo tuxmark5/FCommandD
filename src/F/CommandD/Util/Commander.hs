@@ -1,15 +1,16 @@
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeSynonymInstances #-}
 
 module F.CommandD.Util.Commander
-( Actions(..)
-, CmdM
+( CmdM
 , Commander(..)
 , MethodCall(..)  -- dbus
 , Profile(..)
 , Session(..)
 , addSink
-, getActions
 , getCallCmd
 , getRunCmd
 , nextProfile
@@ -20,7 +21,7 @@ module F.CommandD.Util.Commander
 , toVariant       -- dbus
 ) where
   
-{- ########################################################################################## -}  
+{- ########################################################################################## -}
 import            Control.Concurrent (forkIO)
 import            Control.Concurrent.MVar
 import            Control.Exception (handle)
@@ -50,11 +51,12 @@ import            F.CommandD.Util.WindowMatcher
 import            System.Posix.Env (setEnv)
 {- ########################################################################################## -}
 
-data Actions = A 
-  { actCall   :: MethodCall -> IO ()
-  , actMacro  :: MacroM () -> IO ()
-  , actRun    :: String -> [String] -> IO ()
-  }
+instance CommandC Commander (MacroM ()) where 
+  runCommand cmd m = forkIO_ $ runMacro (cmdHub cmd) m
+instance CommandC Commander MethodCall where 
+  runCommand cmd c = forkIO_ $ getCallCmd cmd c
+instance CommandC Commander String     where 
+  runCommand cmd s = forkIO_ $ getRunCmd cmd s []
 
 type CmdM a = StateT Commander IO a
 
@@ -89,22 +91,15 @@ addSink name (Sink sink) = gets cmdProfiles >>= \pv -> lift $ do
   pr   <- newProfile name (Just $ SinkA sink)
   putMVar pv (list ++ [pr])
 
-getActions :: SinkC s => Commander -> Sink s -> CD Actions
-getActions cmd sink = return $ A
-  { actCall   = getCallCmd cmd
-  , actMacro  = runMacro sink
-  , actRun    = getRunCmd cmd
-  }
-
-getCallCmd :: Commander -> (MethodCall -> IO ())
-getCallCmd cmd = \c -> do
+getCallCmd :: Commander -> MethodCall -> IO ()
+getCallCmd cmd c = do
   p <- getFirstProfile cmd
   case prClient p of
     Just client   -> call_ client c >> return ()
     Nothing       -> B.putStrLn $ B.concat ["No client for this profile: ", prName p]
   
-getRunCmd :: Commander -> (String -> [String] -> IO ())
-getRunCmd cmd = \app args -> withSession cmd $ \ses -> let
+getRunCmd :: Commander -> String -> [String] -> IO ()
+getRunCmd cmd app args = withSession cmd $ \ses -> let
   run app []    = runInShell    ses 1000 app
   run app args  = runInSession  ses 1000 app args
   in run app args
@@ -256,6 +251,9 @@ connectFirst addrs = loop addrs where
   loop (a:as) = handle (\(e :: ConnectionError) -> loop as) $ do
     putStrLn $ "[DBUS] Connecting " ++ (show a)
     connect a >>= return . Just
+
+forkIO_ :: IO () -> IO ()
+forkIO_ m = forkIO m >> return ()
 
 replaceOne :: (a -> Bool) -> (Maybe a -> IO a) -> [a] -> IO ([a], a)
 replaceOne _    rep [      ] = rep Nothing >>= \p -> return $ ([p], p)

@@ -1,8 +1,11 @@
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeSynonymInstances #-}
 
 module F.CommandD.Filter.MacroFilter
-( MacroFilter(..)
+( CommandC(..)
+, MacroFilter(..)
 , ModeM
 , aliasDev
 , aliasKey
@@ -17,7 +20,7 @@ module F.CommandD.Filter.MacroFilter
 {- ########################################################################################## -}
 import            Control.Concurrent (forkIO)
 import            Control.Concurrent.MVar
-import            Control.Monad (forM_, replicateM_, when)
+import            Control.Monad (forM_, replicateM_, sequence_, when)
 import            Control.Monad.Trans.State (State(..), StateT(..), evalStateT)
 import qualified  Control.Monad.Trans.State as S
 import            Data.ByteString.Char8 (ByteString)
@@ -60,6 +63,12 @@ instance SinkC MacroFilter where
 
 {- ########################################################################################## -}
 
+class CommandC s a where
+  runCommand :: s -> a -> IO ()
+
+instance CommandC s (IO ()) where
+  runCommand _  m = forkIO m >> return ()
+
 data Mode = Mode
   { modeChildren  :: [Mode]
   , modeEnabled   :: IORef Bool
@@ -67,8 +76,13 @@ data Mode = Mode
   , modeRootNode  :: Node
   }
   
-type ModeM a  = StateT ModeS  IO a 
-data ModeS    = ModeS KeyMap Mode
+type ModeM s a = StateT (ModeS s) IO a
+
+data ModeS s = ModeS
+  { msKeyMap      :: KeyMap
+  , msMode        :: Mode
+  , msState       :: s
+  }
 
 addMacro :: Mode -> IO () -> [Key] -> Mode
 addMacro m0 act combo = m0 { modeRootNode = addMacro' (modeRootNode m0) act combo }
@@ -128,21 +142,21 @@ newMode name = do
     , modeRootNode  = defaultNode
     }
     
-mode :: ByteString -> ModeM a -> ModeM a
-mode name m = StateT $ \(ModeS kmap mode0) -> do
-  newMode0              <- newMode name
-  (a, ModeS _ newMode1) <- runStateT m $ ModeS kmap newMode0
-  return (a, ModeS kmap (addMode mode0 newMode1))
+mode :: ByteString -> ModeM s a -> ModeM s a
+mode name m = StateT $ \ms -> do
+  newMode0  <- newMode name
+  (a, ms1)  <- runStateT m ms { msMode = newMode0 }
+  return (a, ms { msMode = addMode (msMode ms) (msMode ms1) })
 
-runMode :: Filter MacroFilter -> ModeM a -> CD a
-runMode (Sink f) m = lift $ modifyMVar f $ \dat0 -> do
-  (a, ModeS k mode1)  <- runStateT m $ ModeS (mfsKeyMap dat0) (mfsRootMode dat0)
-  modes               <- collectModes mode1
+runMode :: Filter MacroFilter -> s -> ModeM s a -> CD a
+runMode (Sink f) s m = lift $ modifyMVar f $ \dat0 -> do
+  (a, ms1)  <- runStateT m $ ModeS (mfsKeyMap dat0) (mfsRootMode dat0) s
+  modes     <- collectModes $ msMode ms1 
   return (dat0 
-    { mfsKeyMap     = k
+    { mfsKeyMap     = msKeyMap ms1
     , mfsModes      = modes
     , mfsNodes      = map modeRootNode modes
-    , mfsRootMode   = mode1 
+    , mfsRootMode   = msMode ms1 
     }, a)
 
 printMode :: Int -> Mode -> IO ()
@@ -302,7 +316,7 @@ runMacroM :: MacroFilter -> MacroM a -> CE a
 runMacroM var m = lift $ modifyMVar var $ \state0 -> do
   --let (r, state1)  = S.runState m state0
   (r, state1)     <- S.runStateT m state0
-  forM_ (mfsActions state1) $ \act -> forkIO $ act
+  sequence_ (mfsActions state1)
   return (state1 { mfsActions = [] }, r)
   
 supressEvent :: MacroFilter -> CE ()
@@ -335,22 +349,24 @@ updatePressedKeys e key = modifyPressedKeys $ case (eventValue e) of
   
 {- ########################################################################################## -}
  
-aliasDev :: SourceId -> ByteString -> ModeM ()
-aliasDev sid name = S.modify $ \(ModeS kmap mode) -> (ModeS (addDev kmap name sid) mode)
+aliasDev :: SourceId -> ByteString -> ModeM s ()
+aliasDev sid name = S.modify $ \s -> s { msKeyMap = addDev (msKeyMap s) name sid }
  
-aliasKey :: ByteString -> ByteString -> ByteString -> ModeM ()
-aliasKey key0 dev1 key1 = S.get >>= \(ModeS kmap mode) -> do
-  let key = lookupKey kmap key0
-      dev = lookupDev kmap dev1
+aliasKey :: ByteString -> ByteString -> ByteString -> ModeM s ()
+aliasKey key0 dev1 key1 = S.get >>= \ms0 -> do
+  let key = lookupKey (msKeyMap ms0) key0
+      dev = lookupDev (msKeyMap ms0) dev1
   case (dev, key) of
-    (Just d,  Just k) -> S.put $ ModeS (addKey kmap key1 d (keyCode k)) (mode)
+    (Just d,  Just k) -> S.put $ ms0 { msKeyMap = addKey (msKeyMap ms0) key1 d (keyCode k) }
     (d,       k     ) -> lift $ putStrLn $ concat ["[ERROR] Invalid key alias", show d, show k]
 
-command :: String -> IO () -> ModeM ()
-command combo action = S.get >>= \(ModeS kmap mode0) -> do 
-  case parseMacro kmap combo of
+command :: CommandC s c => String -> c -> ModeM s ()
+command combo cmd = S.get >>= \ms0 -> do 
+  case parseMacro (msKeyMap ms0) combo of
     Left  err -> lift $ putStrLn err
-    Right seq -> S.put $ ModeS kmap (addMacro mode0 action seq)
+    Right seq -> let
+      io = runCommand (msState ms0) cmd
+      in S.put $ ms0 { msMode = addMacro (msMode ms0) io seq }
   
 newMacroFilter :: CD (Filter MacroFilter)
 newMacroFilter = lift $ do
