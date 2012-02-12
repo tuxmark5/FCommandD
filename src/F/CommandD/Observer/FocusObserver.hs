@@ -80,10 +80,14 @@ handleException e = putStrLn $ "___" ++ show e
 
 mainLoop :: FocusObserver -> IO ()
 mainLoop s = do
+  err <- X.pollForError $ foConnection s
   evt <- X.waitForEvent $ foConnection s
   case fromEvent evt of
-    Just e    -> handleEvent s e >> mainLoop s
-    Nothing   -> return ()
+    Just e    -> handleEvent s e 
+    Nothing   -> return ()
+  case err of
+    Just e    -> putStrLn ">> ERROR <<"
+    Nothing   -> mainLoop s
 
 newFocusEvent :: FocusEvent
 newFocusEvent = FocusChanged

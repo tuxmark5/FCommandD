@@ -611,6 +611,9 @@ defaultKeys =
   , ("ZoomIn",              keyZoomIn           )
   , ("ZoomOut",             keyZoomOut          )
   , ("ZoomReset",           keyZoomReset        )
+
+  , ("WheelDown",           relWheelDown        )
+  , ("WheelUp",             relWheelUp          )
   ]
 
 {- ########################################################################################## -}

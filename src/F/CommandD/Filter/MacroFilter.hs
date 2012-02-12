@@ -23,8 +23,9 @@ import qualified  Control.Monad.Trans.State as S
 import            Data.ByteString.Char8 (ByteString)
 import qualified  Data.ByteString.Char8 as B
 import            Data.Int (Int32)
-import            Data.List (find, partition)
 import            Data.IORef
+import            Data.List (find, partition)
+import            Data.Word (Word16)
 import            F.CommandD.Core
 import            F.CommandD.Filter
 import            F.CommandD.Filter.MacroParser
@@ -51,9 +52,9 @@ instance SinkC MacroFilter where
   sinkWrite var = get >>= \e -> do
     let et = eventType e
     case () of 
-      _ | et == evMSC -> exitContST () --supressEvent var
-        | et == evREL -> return () -- appendEvent $ synEvent e
-        | et == evSYN -> return () -- exitContST ()
+      _ | et == evMSC -> exitContST () 
+        | et == evREL -> onRelEvent var -- appendEvent $ synEvent e
+        | et == evSYN -> return () 
         | et == evKEY -> onKeyEvent var
         | otherwise   -> onUnknownEvent
 
@@ -247,11 +248,11 @@ modifyPressedKeys :: ([Key] -> [Key]) -> MacroM ()
 modifyPressedKeys mod = S.modify $ \s -> s { mfsPressedKeys = mod $ mfsPressedKeys s }
    
 onKeyEvent :: MacroFilter -> CE ()
-onKeyEvent var = get >>= \e -> do
-  filt <- runMacroM var (processKeyEvent e) 
-  if filt
-    then exitContST ()
-    else appendEvent $ synEvent e
+onKeyEvent = runFilter processKeyEvent 
+
+onRelEvent :: MacroFilter -> CE ()
+onRelEvent var = get >>= \e -> do
+  when (eventCode e == relWheel) $ runFilter processRelEvent var
 
 onUnknownEvent :: CE ()
 onUnknownEvent = get >>= \e -> do
@@ -274,13 +275,29 @@ processKeyEvent e = do
       return f
     2 -> isKeyFiltered key
 
+processRelEvent :: Event -> MacroM Bool
+processRelEvent e = do
+  let key = toKey e
+  modifyPressedKeys $ \   keys  -> key:keys
+  testNodes
+  modifyPressedKeys $ \(k:keys) ->     keys
+  f <- resetNodes
+  return f
+
 removeFilteredKey :: Key -> MacroM Bool
 removeFilteredKey k = do
   st0 <- S.get
   let (r, fkeys1) = partition (== k) (mfsFilteredKeys st0)
   S.put st0 { mfsFilteredKeys = fkeys1 }
   return $ not $ null r
-  
+
+runFilter :: (Event -> MacroM Bool) -> MacroFilter -> CE ()
+runFilter filter var = get >>= \e -> do
+  filt <- runMacroM var (filter e) 
+  if filt
+    then exitContST ()
+    else appendEvent $ synEvent e
+
 runMacroM :: MacroFilter -> MacroM a -> CE a
 runMacroM var m = lift $ modifyMVar var $ \state0 -> do
   --let (r, state1)  = S.runState m state0
@@ -300,9 +317,13 @@ synEvent base   = base
   , eventValue  = 0
   }
   
+toCode :: Event -> Word16
+toCode e | eventType e == evKEY = eventCode e 
+         | eventType e == evREL = 0x8000 + (eventCode e) * 2 + if eventValue e > 0 then 1 else 0
+
 toKey :: Event -> Key
 toKey e = defaultKey 
-  { keyCode   = fromIntegral $ eventCode e
+  { keyCode   = toCode e
   , keyDevice = eventSource e
   }
 

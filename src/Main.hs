@@ -59,101 +59,137 @@ registerKeys = do
 {- ########################################################################################## -}
   
 -- mode to launch applications
-modeApps :: (String -> [String] -> IO ()) -> ModeM ()
-modeApps run = do
-  command "*LeftAlt+F2"       $ run "`dmenu_path | dmenu -b`"     []
-  command "*Super+B"          $ run "VirtualBox"                  []
-  command "*Super+C"          $ run "urxvt -e python"             []
-  command "*Super+F*Super+F"  $ run "firefox"                     []
-  command "*Super+F*Super+M"  $ run "Thunar"                      []
-  command "*Super+H"          $ run "krusader --left ~ --right ~" []
-  command "*Super+O"          $ run "opera"                       []
-  command "*Super+R"          $ run "transmission-gtk"            []
-  command "*Super+S"          $ run "skype"                       []
-  command "*Super+T"          $ run "urxvt -e tmux"               []
-  command "*Super+Y"          $ run "pkexec synaptic"             []
-  command "*Super+V"          $ run "vmware"                      []
-
-modeFirefox :: (MacroM () -> IO ()) -> ModeM ()
-modeFirefox exec = do
-  command "+N1"               $ exec $ firefoxGoBack
-  command "+N2"               $ exec $ firefoxTabClose
-  command "+N3"               $ exec $ firefoxGoForward
-  command "+N4"               $ exec $ firefoxOpenInNewTab
-  command "*LeftShift+N4"     $ exec $ firefoxSearchForSel
+modeApps :: Actions -> ModeM ()
+modeApps (A _ _ r) = do
+  command "*LeftAlt+F2"       $ r "`dmenu_path | dmenu -b`"     []
+  command "*Super+B"          $ r "VirtualBox"                  []
+  command "*Super+C"          $ r "urxvt -e python"             []
+  command "*Super+F*Super+F"  $ r "firefox"                     []
+  command "*Super+F*Super+M"  $ r "Thunar"                      []
+  command "*Super+H"          $ r "krusader --left ~ --right ~" []
+  command "*Super+O"          $ r "opera"                       []
+  command "*Super+R"          $ r "transmission-gtk"            []
+  command "*Super+S"          $ r "skype"                       []
+  command "*Super+T"          $ r "urxvt -e tmux"               []
+  command "*Super+Y"          $ r "pkexec synaptic"             []
+  command "*Super+V"          $ r "vmware"                      []
 
 -- mode to control Guayadeque via DBus
-modeGuayadeque :: (MethodCall -> IO ()) -> ModeM ()
-modeGuayadeque call = do
-  command "+NextSong"         $ call $ gdqNext
-  command "+PlayPause"        $ call $ gdqPlayPause
-  command "+PreviousSong"     $ call $ gdqPrev
-  command "+StopCD"           $ call $ gdqStop
+modeGuayadeque :: Actions -> ModeM ()
+modeGuayadeque (A c _ _) = do
+  command "+NextSong"         $ c $ gdqNext
+  command "+PlayPause"        $ c $ gdqPlayPause
+  command "+PreviousSong"     $ c $ gdqPrev
+  command "+StopCD"           $ c $ gdqStop
 
-  command "*Hyper+N10"        $ call $ gdqPrev
-  command "*Hyper+N11"        $ call $ gdqPlayPause
-  command "*Hyper+N12"        $ call $ gdqNext
-  
+  command "*Hyper+N10"        $ c $ gdqPrev
+  command "*Hyper+N11"        $ c $ gdqPlayPause
+  command "*Hyper+N12"        $ c $ gdqNext
+
 -- mode to control XMonad via DBus
-modeXMonad :: (MethodCall -> IO ()) -> ModeM ()
-modeXMonad call = do
-  command "*Hyper+Z"          $ call $ xmonadCoreExit
-  command "*Hyper+X"          $ call $ xmonadCoreRestart
-  command "*Hyper+H"          $ call $ xmonadCoreSetWMName "L3GD"
-  command "*Hyper+K"          $ call $ xmonadLayoutExpand
-  command "*Hyper+Backslash"  $ call $ xmonadLayoutNext
-  command "*Hyper+J"          $ call $ xmonadLayoutShrink
-  command "*Hyper+Space"      $ call $ xmonadMasterFocus
-  command "*Hyper+Minus"      $ call $ xmonadMasterMod (-1)
-  command "*Hyper+Equal"      $ call $ xmonadMasterMod ( 1)
-  command "*Hyper+Enter"      $ call $ xmonadMasterSwap
-  command "*Hyper+Grave"      $ call $ xmonadNavGridSelect
-  command "*Hyper+RightBrace" $ call $ xmonadTabNext
-  command "*Hyper+LeftBrace"  $ call $ xmonadTabPrev
-  command "*Hyper+U"          $ call $ xmonadTabUnmerge
-  command "*Hyper+C"          $ call $ xmonadWinClose
-  command "*Hyper+T"          $ call $ xmonadWinSink
+modeXMonad :: Actions-> ModeM ()
+modeXMonad (A c _ _) = do
+  command "*Hyper+Z"          $ c $ xmonadCoreExit
+  command "*Hyper+X"          $ c $ xmonadCoreRestart
+  command "*Hyper+H"          $ c $ xmonadCoreSetWMName "L3GD"
+  command "*Hyper+K"          $ c $ xmonadLayoutExpand
+  command "*Hyper+Backslash"  $ c $ xmonadLayoutNext
+  command "*Hyper+J"          $ c $ xmonadLayoutShrink
+  command "*Hyper+Space"      $ c $ xmonadMasterFocus
+  command "*Hyper+Minus"      $ c $ xmonadMasterMod (-1)
+  command "*Hyper+Equal"      $ c $ xmonadMasterMod ( 1)
+  command "*Hyper+Enter"      $ c $ xmonadMasterSwap
+  command "*Hyper+Grave"      $ c $ xmonadNavGridSelect
+  command "*Hyper+RightBrace" $ c $ xmonadTabNext
+  command "*Hyper+LeftBrace"  $ c $ xmonadTabPrev
+  command "*Hyper+U"          $ c $ xmonadTabUnmerge
+  command "*Hyper+C"          $ c $ xmonadWinClose
+  command "*Hyper+T"          $ c $ xmonadWinSink
 
   -- command "+N1"               $ call $ xmonadWkSetCurrent "1"
 
   -- Workspace navigation
   forM_ (zip "1234QWERASDF" "123456789ABC") $ \(key, wk) -> do
-    command ("*Hyper+"         ++ [key]) $ call $ xmonadWkSetCurrent [wk]
-    command ("*Hyper*LeftAlt+" ++ [key]) $ call $ xmonadWkMoveWindow [wk]
+    command ("*Hyper+"         ++ [key]) $ c $ xmonadWkSetCurrent [wk]
+    command ("*Hyper*LeftAlt+" ++ [key]) $ c $ xmonadWkMoveWindow [wk]
 
   -- Screen navigation
   forM_ (zip3 ["Comma", "Dot"] ["N4", "N6"] [0, 1]) $ \(k0, k1, scr) -> do
-    command ("*Hyper+"         ++ k0) $ call $ xmonadScreenSetCurr scr
-    command ("*Hyper*LeftAlt+" ++ k0) $ call $ xmonadScreenMoveWin scr
-    command ("*Hyper+"         ++ k1) $ call $ xmonadScreenMoveWin scr
+    command ("*Hyper+"         ++ k0) $ c $ xmonadScreenSetCurr scr
+    command ("*Hyper*LeftAlt+" ++ k0) $ c $ xmonadScreenMoveWin scr
+    command ("*Hyper+"         ++ k1) $ c $ xmonadScreenMoveWin scr
 
   -- Directional window navigation
   forM_ (zip ["L", "Apostrophe", "P", "SemiColon"] [0, 1, 2, 3]) $ \(key, dir) -> do
-    command ("*Hyper+"         ++ key) $ call $ xmonadNavMove dir
-    command ("*Hyper*LeftAlt+" ++ key) $ call $ xmonadTabMerge dir
-  
-modeXTerm :: (MacroM () -> IO ()) -> ModeM ()
-modeXTerm exec = do
-  command "+N1"               $ exec $ downUp keyQ
-  command "+N2"               $ exec $ downUp keyW
-  command "+N3"               $ exec $ downUp keyE
-  command "+N4"               $ exec $ downUp keyR
-  {-command "+M1"               $ run "xmessage" ["1"]
-  command "+M2"               $ run "xmessage" ["2"]
-  command "+M3"               $ run "xmessage" ["3"]
-  command "+M4"               $ run "xmessage" ["4"]
-  command "+M5"               $ run "xmessage" ["5"]-}
+    command ("*Hyper+"         ++ key) $ c $ xmonadNavMove dir
+    command ("*Hyper*LeftAlt+" ++ key) $ c $ xmonadTabMerge dir
+
+{- ########################################################################################## -}
+
+fastMouseWheel :: Actions -> ModeM ()
+fastMouseWheel (A _ m _) = do
+  command "+WheelDown:N"      $ m $ rel relWheel (-5)
+  command "+WheelUp:N"        $ m $ rel relWheel ( 5)
+
+modeDefault :: Actions -> ModeM ()
+modeDefault a@(A _ _ _) = mode "default" $ do
+  fastMouseWheel a
+
+modeFirefox :: Actions -> ModeM ()
+modeFirefox (A _ m _) = mode "firefox" $ do
+  command "+N1"               $ m $ firefoxGoBack
+  command "+N2"               $ m $ firefoxTabClose
+  command "+N3"               $ m $ firefoxGoForward
+  command "+N4"               $ m $ firefoxOpenInNewTab
+  command "*LeftShift+N4"     $ m $ firefoxSearchForSel
+
+modeGEdit :: Actions -> ModeM ()
+modeGEdit a@(A _ _ _) = mode "gedit" $ do
+  fastMouseWheel a
+
+modeKrusader :: Actions -> ModeM ()
+modeKrusader (A _ _ _) = mode "krusader" $ do
+  return ()
+
+modeMPlayer :: Actions -> ModeM ()
+modeMPlayer (A _ _ _) = mode "mplayer" $ do
+  return ()
+
+modeOpera :: Actions -> ModeM ()
+modeOpera (A _ _ _) = mode "opera" $ do
+  return ()
+
+modeSublime :: Actions -> ModeM ()
+modeSublime a@(A _ m _) = mode "sublime" $ do
+  fastMouseWheel a
+
+modeVMware :: Actions -> ModeM ()
+modeVMware (A _ m _) = mode "vmware" $ do
+  command "+Hyper" $ m $ hold keyLeftCtrl $ downUp keyLeftAlt
+
+modeXTerm :: Actions -> ModeM ()
+modeXTerm a@(A _ m _) = mode "xterm" $ do
+  command "+N1"               $ m $ downUp keyQ
+  fastMouseWheel a
 
 {- ########################################################################################## -}
 
 switcher :: (ByteString -> IO ()) -> WinM ()
 switcher set = do
-  mClass0 "xterm"       $ set "xterm"
   mClass1 "Firefox"     $ set "firefox"
+  mClass0 "gedit"       $ set "gedit"
+  mClass0 "krusader"    $ set "krusader"
+  mClass1 "MPlayer"     $ set "mplayer"
+  mClass0 "opera"       $ set "opera"  -- CHECK THIS
+  mClass0 "sublime"     $ set "sublime"
+  mClass0 "vmware"      $ set "vmware"
+  mClass0 "xterm"       $ set "xterm"
   mName "Event Tester"  $ set "xterm"
-  mAny                  $ set ""
+  mAny                  $ set "default"
 
 {- ########################################################################################## -}
+
+-- toggle suspend mode
 
 main :: IO ()
 main = daemon $ do
@@ -168,21 +204,26 @@ main = daemon $ do
     addSink "Main"  uinput0
     addSink "Dl"    uinput1
     setModeSwitcher macro switcher
-
-  call        <- getCallCmd cmd
-  run         <- getRunCmd cmd
+  a           <- getActions cmd hub
   
   runMode macro $ do
     registerKeys
     command "*FN+Compose" $ nextProfile cmd
 
-    mode "apps"         $ modeApps run
-    mode "guayadeque"   $ modeGuayadeque call
-    mode "xmonad"       $ modeXMonad call
+    mode "apps"         $ modeApps a
+    mode "guayadeque"   $ modeGuayadeque a
+    mode "xmonad"       $ modeXMonad a
 
     mode "local" $ do
-      mode "firefox"    $ modeFirefox $ runMacro hub
-      mode "xterm"      $ modeXTerm   $ runMacro hub
+      modeDefault   a
+      modeFirefox   a
+      modeGEdit     a
+      modeKrusader  a
+      modeMPlayer   a
+      modeOpera     a
+      modeSublime   a
+      modeVMware    a
+      modeXTerm     a
   
   evdev >>> macro >>> hub
   lift $ putStrLn "[*] Initialized ..."

@@ -2,12 +2,14 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 
 module F.CommandD.Util.Commander
-( CmdM
+( Actions(..)
+, CmdM
 , Commander(..)
 , MethodCall(..)  -- dbus
 , Profile(..)
 , Session(..)
 , addSink
+, getActions
 , getCallCmd
 , getRunCmd
 , nextProfile
@@ -42,10 +44,17 @@ import            F.CommandD.Observer.FocusObserver
 import            F.CommandD.Observer.ProcessObserver
 import            F.CommandD.Observer.SessionObserver
 import            F.CommandD.Sink
+import            F.CommandD.Source.VirtualSource
 import            F.CommandD.Util.Chan
 import            F.CommandD.Util.WindowMatcher
 import            System.Posix.Env (setEnv)
 {- ########################################################################################## -}
+
+data Actions = A 
+  { actCall   :: MethodCall -> IO ()
+  , actMacro  :: MacroM () -> IO ()
+  , actRun    :: String -> [String] -> IO ()
+  }
 
 type CmdM a = StateT Commander IO a
 
@@ -80,15 +89,22 @@ addSink name (Sink sink) = gets cmdProfiles >>= \pv -> lift $ do
   pr   <- newProfile name (Just $ SinkA sink)
   putMVar pv (list ++ [pr])
 
-getCallCmd :: Commander -> CD (MethodCall -> IO ())
-getCallCmd cmd = return $ \c -> do
+getActions :: SinkC s => Commander -> Sink s -> CD Actions
+getActions cmd sink = return $ A
+  { actCall   = getCallCmd cmd
+  , actMacro  = runMacro sink
+  , actRun    = getRunCmd cmd
+  }
+
+getCallCmd :: Commander -> (MethodCall -> IO ())
+getCallCmd cmd = \c -> do
   p <- getFirstProfile cmd
   case prClient p of
     Just client   -> call_ client c >> return ()
     Nothing       -> B.putStrLn $ B.concat ["No client for this profile: ", prName p]
   
-getRunCmd :: Commander -> CD (String -> [String] -> IO ())
-getRunCmd cmd = return $ \app args -> withSession cmd $ \ses -> let
+getRunCmd :: Commander -> (String -> [String] -> IO ())
+getRunCmd cmd = \app args -> withSession cmd $ \ses -> let
   run app []    = runInShell    ses 1000 app
   run app args  = runInSession  ses 1000 app args
   in run app args

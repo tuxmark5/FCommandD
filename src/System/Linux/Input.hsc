@@ -364,16 +364,16 @@ evFF              = #const EV_FF
 evPWR             = #const EV_PWR
 evFFStatus        = #const EV_FF_STATUS
 
-relX              :: CInt
-relY              :: CInt
-relZ              :: CInt
-relRX             :: CInt
-relRY             :: CInt
-relRZ             :: CInt
-relHWheel         :: CInt
-relDial           :: CInt
-relWheel          :: CInt
-relMisc           :: CInt
+relX              :: Word16
+relY              :: Word16
+relZ              :: Word16
+relRX             :: Word16
+relRY             :: Word16
+relRZ             :: Word16
+relHWheel         :: Word16
+relDial           :: Word16
+relWheel          :: Word16
+relMisc           :: Word16
 
 relX              = #const REL_X
 relY              = #const REL_Y

@@ -1,10 +1,12 @@
 module F.CommandD.Source.VirtualSource
-( module System.Linux.Keys
+( module System.Linux.Input
+, module System.Linux.Keys
 , MacroM(..)
 , delay
 , down
 , downUp
 , hold
+, rel
 , runMacro
 , up
 ) where
@@ -47,6 +49,11 @@ downUp k = down k >> up k
 
 hold :: Word16 -> MacroM a -> MacroM a
 hold k m = down k >> m >>= \r -> up k >> return r
+
+rel :: Word16 -> Int32 -> MacroM ()
+rel axis amount = do
+  newEvent evREL axis amount  >>= sendEvent
+  newSynEvent                 >>= sendEvent
 
 up :: Word16 -> MacroM ()
 up k = do
