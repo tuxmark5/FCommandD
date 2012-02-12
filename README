@@ -46,14 +46,14 @@ In order to use FCommandD, you need to:
 5. Update cabal's database:
    cabal update
 
-4. Compile & install FCommandD:
+6. Compile & install FCommandD:
    cd <FCommandD source dir>
    cabal install 
 
-5. Start the daemon:
+7. Start the daemon:
    sudo <path to fcommandd>/fcommandd
 
-6. Optionally you can add fcommandd to system's startup 
+8. Optionally you can add fcommandd to system's startup 
    (example upstart script - files/fcommandd.conf)
 
 ################################################################################
