@@ -1,0 +1,202 @@
+FCommandD is an input server. It grabs all incoming events from linux evdev
+input devices (/dev/input/event*) and forwards them to virtual uinput sinks.
+This allows to filter incoming events and to react to various key combinations
+(send DBus-messages, launch new applications and so on).
+
+FCommandD can be used to:
+* launch applications (much like xbindkeys)
+* send d-bus messages (e.g. to control a media player)
+* simulate key presses (e.g. to translate keyboard shortcuts. This can be
+  very useful when combined with a mouse, which has some extra buttons)
+* perform actions based on current context ("modes" can be switched dynamically 
+  based on currently focused window.)
+* to make mouse wheel scroll faster
+* and so on.
+
+
+A typical FCommandD event chain looks like this:
+
+EVDev Keyboard  ---\                            /--> Virtual UInput Sink #1 
+                    ==> Macro Filter --> Hub === 
+EVDev Mouse     ---/                            \--> Virtual UInput Sink #2 
+
+FCommandD periodically monitors processes. This way the daemon can detect
+new sessions based on process name and identify the session by it's
+environment variables. When daemon detects a new session, it connects to it's
+D-Bus and Xorg services. This way FCommandD can monitor actively focused window
+of each session and to send d-bus to that session's applications.
+
+################################################################################
+# INSTALLATION   
+################################################################################
+
+In order to use FCommandD, you need to:
+1. Download the source of FCommandD:
+   git clone git@github.com:tuxmark5/FCommandD.git
+
+2. Copy files/allow-root-access.conf to /etc/dbus-1/session.d
+   This allows for root to access regular d-bus sessions (for some reason
+   this is disabled by default)
+
+3. Tweak src/Main.hs to your liking.
+
+4. Compile & install FCommandD:
+   cabal install 
+
+################################################################################
+# CONFIGURATION   
+################################################################################
+
+All user specific configuration is stored within src/Main.hs source file
+
+A few important sections of the config file:
+
+1. Input device filter:
+
+mdev :: Word16 -> Word16 -> IO SourceId
+mdev 0x1532 0x010d  = return 0      -- BlackWidow
+mdev 0x1532 0x001f  = return 1      -- Naga
+mdev _      _       = return (-1)
+
+This code fragment identifies input devices based on USB vendor and product ids
+and assigns to each device an identifier (SourceId).
+
+Identifier -1 tells FCommandD to ignore device.
+
+2. Session filter:
+
+sesFilt :: ByteString -> Bool
+sesFilt "dwm"             = True
+sesFilt "fmonad"          = True
+sesFilt "xfce4-session"   = True
+sesFilt _                 = False
+
+Session filter is used to identify new sessions. These processes are called
+session processes. The environments of such processes are used to launch
+new applications (this way variables like DISPLAY, XAUTHORITY and so on are 
+ensured to be correct).
+
+3. Session identifier:
+
+sesId :: Session -> IO ByteString
+sesId Session { sesDisplay = ":5" } = return "Dl"
+sesId _                             = return "Main"
+
+Session identifier assigns a name to each session. This name can be used
+to switch between sessions.
+
+This is only useful when there are more than one Xorg servers running at the
+same time (and usually on different monitors).
+
+With one session such session identifier is sufficient:
+
+sesId :: Session -> IO ByteString
+sesId _ = return "Main"
+
+4. The main function:
+
+main :: IO ()
+main = daemon $ do
+  lift $ putStrLn "[*] Starting ..."
+  evdev       <- mkEVDevSourceDyn mdev          -- creates input sources based on dev filter
+  uinput0     <- mkUInputSink "Primary"         -- creates virtual sink #1
+  macro       <- newMacroFilter                 -- creates the macro filter
+
+  (cmd, hub)  <- newCommander sesId $ do        -- creates a commander*
+    addSink "Main"  uinput0                     -- assigns sink uinput0 to session "Main" 
+    setModeSwitcher macro switcher              -- assigns mode switcher**
+    setSessionFilter sesFilt                    -- assigns a session filter
+  
+  runMode macro cmd $ do                        -- registers modes
+    mode "global" $ do
+      modeApps
+      modeGuayadeque
+      modeVolume
+      modeXMonad
+
+    mode "local" $ do
+      modeDefault
+      modeFirefox
+      modeGEdit
+      modeKrusader
+      modeLibreOfficeWriter
+      modeMPlayer
+      modeOpera
+      modeSublime
+      modeVMware
+      modeXTerm
+  
+  evdev >>> macro >>> hub   -- connects the evdev source with the macro filter and the hub***
+
+  lift $ putStrLn "[*] Initialized ..."
+  lift $ forever $ threadDelay 500000000
+
+
+* commander is responsible for handling session creation/destruction
+** mode switcher can be used to disable/enable modes based on currently focused
+   window's properties
+*** hubs can be used to redirect event stream between multiple sinks. Only useful when
+    running multiple X servers at once.
+
+################################################################################
+# MODES
+################################################################################
+
+Commands can be grouped into modes. Modes can be arranged into trees.
+If a parent mode is disabled, so are it's children.
+
+An example mode:
+
+modeApps :: ModeM Commander ()
+modeApps = mode "apps" $ do
+  command "*LeftAlt+F2"       $ run "`dmenu_path | dmenu -b`" 
+  command "*Super+B"          $ run "VirtualBox"
+  command "*Super+C"          $ run "urxvt -e python"
+  command "*Super+F*Super+F"  $ run "firefox"
+  command "*Super+F*Super+M"  $ run "Thunar"
+
+Each command within a mode is triggered by a shortcut.
+Shortcuts follow this grammar:
+
+shortcut    ::= (prefix key device?)+
+prefix      ::= '*' | '+'
+key         ::= identifier
+device      ::= ':' identifier
+identifier  ::= [a-zA-Z0-9]
+
+Each key within a shorcut combo must be prefixed with a '*' or a '+'.
+'*' indicates a MODIFIER key. Modifier keys are never filtered and when pressed
+are always passed to the X server. Any key prefixed with a '*' becomes a modifier key.
+'+' indicates a REGULAR key. Regular keys when matched are filtered.
+
+Each key can be suffixed with a device identifier. If there is no device identifier present
+then FCommandD assumes by default that the key's device number (SourceId) is 0.
+
+Examples:
+*LeftCtrl+Z - LeftCtrl key is NOT filtered, but Z is
+*LeftCtrl+X*LeftCtrl+*LeftShift+Y means exactly same as emacs combo C-x C+Y
+
+################################################################################
+# SOME RANDOM NOTES   
+################################################################################
+
+* FCommandD can only be run as root
+
+* FCommandD does not require X11 to function. All keyboard actions created
+  with FCommandD are global and should work within virtual terminals as well.
+  It can be safely (probably :D ) started on init 3
+
+* FCommandD was only tested on a x86_64 system, so there are no guarantees
+  that it will work on any other arch.
+
+* If FCommandD hangs (this should only happen with some crazy configs), then
+  re-plug your keyboard and/or mouse.
+
+* Currently FCommandD can only launch processes as UID=1000 (this is hardcoded).
+  Hopefully will be fixed in the future.
+
+* FCommandD can be used to control window managers as well. An example config
+  for XMonad can be found here:
+  git@github.com:tuxmark5/FMonad.git
+
+################################################################################

@@ -42,6 +42,13 @@ mdev 0x1532 0x010d  = return 0      -- BlackWidow
 mdev 0x1532 0x001f  = return 1      -- Naga
 mdev _      _       = return (-1)
 
+-- Filter session processes
+sesFilt :: ByteString -> Bool
+sesFilt "dwm"             = True
+sesFilt "fmonad"          = True
+sesFilt "xfce4-session"   = True
+sesFilt _                 = False
+
 -- Name sessions based on DISPLAY environment variable
 sesId :: Session -> IO ByteString
 sesId Session { sesDisplay = ":5" } = return "Dl"
@@ -226,6 +233,7 @@ main = daemon $ do
     addSink "Main"  uinput0
     addSink "Dl"    uinput1
     setModeSwitcher macro switcher
+    setSessionFilter sesFilt
   
   runMode macro cmd $ do
     registerKeys
