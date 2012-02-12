@@ -31,23 +31,30 @@ of each session and to send d-bus to that session's applications.
 ################################################################################
 
 In order to use FCommandD, you need to:
-1. Download the source of FCommandD:
+1. Install cabal, git and ghc:
+   sudo apt-get install cabal git ghc 
+
+2. Download the source of FCommandD:
    git clone git@github.com:tuxmark5/FCommandD.git
 
-2. Copy files/allow-root-access.conf to /etc/dbus-1/session.d
+3. Copy files/allow-root-access.conf to /etc/dbus-1/session.d
    This allows for root to access regular d-bus sessions (for some reason
    this is disabled by default)
 
-3. Tweak src/Main.hs to your liking.
+4. Tweak src/Main.hs to your liking.
+
+5. Update cabal's database:
+   cabal update
 
 4. Compile & install FCommandD:
+   cd <FCommandD source dir>
    cabal install 
 
 5. Start the daemon:
    sudo <path to fcommandd>/fcommandd
 
 6. Optionally you can add fcommandd to system's startup 
-   (example upstart config - files/fcommandd.conf)
+   (example upstart script - files/fcommandd.conf)
 
 ################################################################################
 # CONFIGURATION   

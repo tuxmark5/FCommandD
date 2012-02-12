@@ -66,8 +66,8 @@ nagaKeys1 = map (\i -> "N" ++ (show i)) [1..12]
 -- rename keys
 registerKeys :: ModeM Commander ()
 registerKeys = do
-  aliasDev 0 "B" 
-  aliasDev 1 "N" 
+  aliasDev 0 "B" -- BlackWindow
+  aliasDev 1 "N" -- Naga
   aliasKey "LeftMeta" "B" "Super"
   aliasKey "CapsLock" "B" "Hyper"
   aliasKey "F24"      "B" "FN"
