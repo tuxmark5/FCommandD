@@ -74,7 +74,9 @@ mdev _      _       = return (-1)
 This code fragment identifies input devices based on USB vendor and product ids
 and assigns to each device an identifier (SourceId).
 
-Identifier -1 tells FCommandD to ignore device.
+Vendor and product ids can be obtained using lsusb.
+
+Identifier -1 tells FCommandD to ignore the device.
 
 2. Session filter:
 
@@ -211,5 +213,15 @@ Examples:
 * FCommandD can be used to control window managers as well. An example config
   for XMonad can be found here:
   git@github.com:tuxmark5/FMonad.git
+
+################################################################################
+# TODO  
+################################################################################
+
+* TCP Source/Sink. This will replicate functionality of synergy 
+  (http://synergy-foss.org/) project
+* EVDEV device hotplug.
+* Need to parse UIDs from the session environment, so applications can be run 
+  with UIDs other than 1000
 
 ################################################################################
