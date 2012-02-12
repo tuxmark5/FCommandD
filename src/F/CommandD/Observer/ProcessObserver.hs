@@ -20,6 +20,7 @@ import            Data.ByteString (ByteString)
 import qualified  Data.ByteString as B
 import            Data.IORef
 import            Data.List (sort)
+import            Data.Maybe (catMaybes)
 import            F.CommandD.Util.Chan
 import            F.CommandD.Util.Directory
 import            System.INotify hiding (Event)
@@ -36,7 +37,7 @@ data ProcessEvent
 data ProcessObserver = ProcessObserver
   { pmChan        :: ChanO ProcessEvent
   , pmWakeVar     :: MVar ()
-  , pmWatchDescr  :: WatchDescriptor
+  , pmWatchDescr  :: [WatchDescriptor]
   }
 
 eventHandler :: MVar () -> I.Event -> IO ()
@@ -74,7 +75,8 @@ newProcessObserver :: INotify -> IO (ProcessObserver, ChanI ProcessEvent)
 newProcessObserver inotify = do
   (chanI, chanO)  <- newChan
   wakeVar         <- newEmptyMVar
-  watchDescr      <- addWatch inotify [Open] "/lib64/ld-linux-x86-64.so.2" (eventHandler wakeVar)
+  let addW file    = addWatch inotify [Open] file (eventHandler wakeVar)
+  watchDescr      <- mapCatch addW ["/lib/ld-linux.so.2", "/lib64/ld-linux-x86-64.so.2"]
   let pm = ProcessObserver chanO wakeVar watchDescr
   forkIO $ monitorLoop pm []
   return (pm, chanI)
@@ -93,6 +95,10 @@ map1 :: (a -> b) -> [a] -> [b]
 map1 _ []     = []
 map1 _ [_]    = []
 map1 f (x:xs) = f x : map1 f xs
+
+mapCatch :: (a -> IO b) -> [a] -> IO [b]
+mapCatch k list = sequence (map fun list) >>= return . catMaybes
+  where fun a = E.catch (liftM return $ k a) $ \(E.SomeException e) -> return Nothing
   
 readFile' :: FilePath -> IO ByteString
 readFile' f = openBinaryFile f ReadMode >>= B.hGetContents
