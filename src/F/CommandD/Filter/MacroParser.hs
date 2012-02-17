@@ -4,6 +4,7 @@ module F.CommandD.Filter.MacroParser
 ) where
 
 {- ########################################################################################## -}
+import Data.Bits ((.|.))
 import F.CommandD.Util.KeyMap
 import Text.ParserCombinators.Parsec hiding (spaces)
 {- ########################################################################################## -}
@@ -20,20 +21,25 @@ identifier = many1 (letter <|> digit <|> oneOf "@")
 
 key :: Parser NamedKey
 key = do
-  flag  <- oneOf "+*"
+  flag  <- oneOf "+*!"
   key   <- identifier
   dev   <- deviceName
   return $ case dev of
     Just dev  -> NamedKey flag dev key
     Nothing   -> NamedKey flag []  key
-    
+
 macro :: KeyMap -> Parser [Key]
 macro kmap = many1 $ key >>= translate kmap
+
+parseFlag :: Char -> Int32
+parseFlag '+' = flagFiltered
+parseFlag '*' = flagModifier
+parseFlag '!' = flagFiltered .|. flagModifier
 
 translate :: KeyMap ->  NamedKey -> Parser Key
 translate kmap (NamedKey flag dev key) =
   case lookupDevKey' kmap dev key of
-    Just k    -> return $ k { keyFlag = if flag == '+' then 0 else 1 }
+    Just k    -> return $ k { keyFlag = parseFlag flag }
     Nothing   -> fail $ "unknown key: " ++ (show key) 
 
 {- ########################################################################################## -}

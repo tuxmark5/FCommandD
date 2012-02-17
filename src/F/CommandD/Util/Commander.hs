@@ -1,74 +1,80 @@
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE TypeSynonymInstances #-}
-
 module F.CommandD.Util.Commander
 ( CmdM
+, CommandC(..)
 , Commander(..)
-, MethodCall(..)  -- dbus
 , Profile(..)
+, ProM(..)
 , Session(..)
+, activate
 , addSink
-, getCallCmd
-, getRunCmd
-, nextProfile
+, at
+, forkIO_
+, getFirstProfile
+, initCommander
+, nextSession
 , newCommander
 , setFocusHook
-, setModeSwitcher
 , setSessionFilter
-, toVariant       -- dbus
+, setSessionSwitchHook
+, withProfile
+, withSession
 ) where
   
 {- ########################################################################################## -}
 import            Control.Concurrent (forkIO)
 import            Control.Concurrent.MVar
-import            Control.Exception (handle)
+import qualified  Control.Exception as E
 import            Control.Monad (forever, when)
-import            Control.Monad.Trans.State (StateT(..), evalStateT, gets, modify)
+import            Control.Monad.Trans.State (StateT(..), evalStateT, get, gets, modify)
 import            Data.ByteString.Char8 (ByteString)
 import qualified  Data.ByteString.Char8 as B
 import            Data.IORef
+import            Data.List (find)
 import            Data.Maybe (fromJust)
 import            Data.Text.Encoding (decodeUtf8)
 import            DBus.Address
-import            DBus.Client
+import            DBus.Client (Client, connect)
 import            DBus.Connection (ConnectionError(..))
-import            DBus.Message (Flag(..), MethodCall(..))
 import            DBus.Types
-import            F.CommandD.Action.Run
-import            F.CommandD.Core
+import            F.CommandD.Core hiding (get)
 import            F.CommandD.Filter.HubFilter
 import            F.CommandD.Filter.MacroFilter
 import            F.CommandD.Observer.FocusObserver
 import            F.CommandD.Observer.ProcessObserver
 import            F.CommandD.Observer.SessionObserver
 import            F.CommandD.Sink
-import            F.CommandD.Source.VirtualSource
 import            F.CommandD.Util.Chan
 import            F.CommandD.Util.WindowMatcher
 import            System.Posix.Env (setEnv)
 {- ########################################################################################## -}
 
-instance CommandC Commander (MacroM ()) where 
-  runCommand cmd m = forkIO_ $ runMacro (cmdHub cmd) m
-instance CommandC Commander MethodCall where 
-  runCommand cmd c = forkIO_ $ getCallCmd cmd c
-instance CommandC Commander String     where 
-  runCommand cmd s = forkIO_ $ getRunCmd cmd s []
+instance CommandC Commander (CmdM ()) where 
+  runCommand cmd m = forkIO_ $ evalStateT m cmd
+instance CommandC Commander (IO ()) where 
+  runCommand _   m = forkIO_ $ m
+instance CommandC Commander (ProM ()) where 
+  runCommand cmd m = forkIO_ $ withProfile cmd $ \pro -> evalStateT m (cmd, pro)
+
+instance CommandC (Commander, Profile) (IO ()) where 
+  runCommand _   m = m
+instance CommandC (Commander, Profile) (ProM ()) where 
+  runCommand pro m = evalStateT m pro
+
+{- ########################################################################################## -}
 
 type CmdM a = StateT Commander IO a
 
 data Commander = Commander
-  { cmdFocusHook  :: FocusEvent -> IO ()
-  , cmdHub        :: Sink HubFilter
+  { cmdFocusHook  :: FocusEvent -> CmdM ()
+  , cmdHub        :: HubFilter
+  , cmdMacroFilt  :: MacroFilter
   , cmdProcObs    :: ProcessObserver
   , cmdProfId     :: Session -> IO ByteString
   , cmdProfiles   :: MVar [Profile]
   , cmdSesChan    :: ChanI SessionEvent
   , cmdSesFilter  :: ByteString -> Bool
   , cmdSesObs     :: SessionObserver
+  , cmdSesHook    :: ProM ()
   }
   
 data Profile = Profile
@@ -77,7 +83,7 @@ data Profile = Profile
   , prName        :: ByteString
   , prSession     :: Maybe Session
   , prSink        :: Maybe SinkA
-  , prTrigger     :: Profile -> IO ()
+  , prTrigger     :: ProM ()
   }
   
 instance Eq Profile where
@@ -85,66 +91,73 @@ instance Eq Profile where
 
 {- ########################################################################################## -}
 
-addSink :: SinkC s => ByteString -> (Sink s) -> CmdM ()
-addSink name (Sink sink) = gets cmdProfiles >>= \pv -> lift $ do
+activateProfile :: Commander -> Profile -> IO ()
+activateProfile cmd pro = modifyProfiles cmd $ \list -> let
+  (a, b) = span (/= pro) list in (b ++ a)
+
+addSink :: SinkC s => ByteString -> (Sink s) -> ProM () -> CmdM ()
+addSink name (Sink sink) hook = gets cmdProfiles >>= \pv -> lift $ do
   list <- takeMVar pv
   pr   <- newProfile name (Just $ SinkA sink)
   putMVar pv (list ++ [pr])
 
-getCallCmd :: Commander -> MethodCall -> IO ()
-getCallCmd cmd c = do
-  p <- getFirstProfile cmd
-  case prClient p of
-    Just client   -> call_ client c >> return ()
-    Nothing       -> B.putStrLn $ B.concat ["No client for this profile: ", prName p]
-  
-getRunCmd :: Commander -> String -> [String] -> IO ()
-getRunCmd cmd app args = withSession cmd $ \ses -> let
-  run app []    = runInShell    ses 1000 app
-  run app args  = runInSession  ses 1000 app args
-  in run app args
-  
-nextProfile :: Commander -> IO ()
-nextProfile cmd = modifyProfiles cmd $ \(a:r) -> r ++ [a]
-
-setFocusHook :: (FocusEvent -> IO ()) -> CmdM ()
+setFocusHook :: (FocusEvent -> CmdM ()) -> CmdM ()
 setFocusHook hook = modify $ \s -> s { cmdFocusHook = hook }
-
-setModeSwitcher :: (Sink MacroFilter) -> ((ByteString -> IO ()) -> WinM ()) -> CmdM ()
-setModeSwitcher macro sw = setFocusHook (runWinM_ (sw set)) where
-  set = enableXMode macro ["local"]
 
 setSessionFilter :: (ByteString -> Bool) -> CmdM ()
 setSessionFilter filt = modify $ \s -> s { cmdSesFilter = filt }
 
-withSession :: Commander -> (Session -> IO ()) -> IO ()
-withSession cmd m = do
-  p <- getFirstProfile cmd
+setSessionSwitchHook :: ProM () -> CmdM ()
+setSessionSwitchHook hook = modify $ \s -> s { cmdSesHook = hook }
+
+{- ########################################################################################## -}
+
+type ProM a = StateT (Commander, Profile) IO a
+
+activate :: ProM ()
+activate = get >>= \(cmd, pro) -> lift $ activateProfile cmd pro
+
+at :: CommandC (Commander, Profile) a => ByteString -> a -> CmdM ()
+at name a = get >>= \cmd -> lift $ withProfile' cmd name $ \pro -> runCommand (cmd, pro) a
+
+nextSession :: CmdM ()
+nextSession = get >>= \cmd -> lift $ do
+  E.catch (modifyProfiles cmd $ \(a:r) -> r ++ [a]) $ \(E.SomeException e) -> do
+    putStrLn $ show e
+
+{- ########################################################################################## -}
+
+withSession :: (Session -> ProM ()) -> ProM ()
+withSession m = gets snd >>= \p -> do
   case prSession p of
     Just session  -> m session
-    Nothing       -> B.putStrLn $ B.concat ["No session for this profile: ", prName p]
+    Nothing       -> lift $ B.putStrLn $ B.concat ["No session for this profile: ", prName p]
+ 
+withProfile :: Commander -> (Profile -> IO a) -> IO a
+withProfile cmd m = getFirstProfile cmd >>= m
+
+withProfile' :: Commander -> ByteString -> (Profile -> IO ()) -> IO ()
+withProfile' cmd name m = getProfile cmd name >>= \pr -> case pr of
+  Just p    -> m p
+  Nothing   -> B.putStrLn $ B.concat ["No profile named with: ", name]
     
 {- ########################################################################################## -}
+
+emitFocusEvent :: Commander -> Profile -> IO ()
+emitFocusEvent cmd pro = do
+  e <- readIORef (prFocus pro)
+  evalStateT (cmdFocusHook cmd e) cmd
+  return ()
 
 getFirstProfile :: Commander -> IO Profile
 getFirstProfile cmd = readMVar (cmdProfiles cmd) >>= return . head
 
+getProfile :: Commander -> ByteString -> IO (Maybe Profile)
+getProfile cmd name = readMVar (cmdProfiles cmd) >>= return . find filt where
+  filt p = prName p == name
+
 isActiveProfile :: Commander -> Profile -> IO Bool
 isActiveProfile cmd p = getFirstProfile cmd >>= return . (== p)
-
-loopFocus :: Commander -> Profile -> ChanI FocusEvent -> IO ()
-loopFocus cmd p fc = do
-  e <- readChan fc
-  case e of
-    FocusChanged {} -> onFocusChanged cmd p e >> loopFocus cmd p fc
-    FocusDestroyed  -> return ()
-
-loopSession :: Commander -> IO ()
-loopSession cmd = forever $ do
-  e <- readChan (cmdSesChan cmd)
-  case e of
-    SessionCreated    ses -> onSessionCreated cmd ses
-    SessionDestroyed  ses -> onSessionDestroyed cmd ses
 
 modifyProfile :: Commander -> ByteString -> (Profile -> Profile) -> IO Profile
 modifyProfile cmd name mod = modifyMVar (cmdProfiles cmd) $ \pr0 -> do
@@ -155,26 +168,50 @@ modifyProfile cmd name mod = modifyMVar (cmdProfiles cmd) $ \pr0 -> do
 
 modifyProfiles :: Commander -> ([Profile] -> [Profile]) -> IO ()
 modifyProfiles cmd mod = modifyMVar_ (cmdProfiles cmd) $ \p0 -> do
-  let p1 = mod p0
-  case prSink $ head p1 of
-    (Just (SinkA s))  -> hubSetSink (cmdHub cmd) (Sink s)
+  let p1@(pro:_) = mod p0
+  case prSink pro of
+    (Just (SinkA s))  -> hubSetSink (cmdHub cmd) s
     otherwise         -> return ()
+  forkIO $ do
+    emitFocusEvent cmd pro
+    evalStateT (cmdSesHook cmd >> prTrigger pro) (cmd, pro)
   return p1
 
-newCommander :: (Session -> IO ByteString) -> CmdM () -> CD (Commander, Sink HubFilter)
-newCommander profId m = do    
+newProfile :: ByteString -> Maybe SinkA -> IO Profile
+newProfile name sink = do
+  focus <- newIORef newFocusEvent
+  return Profile
+    { prClient      = Nothing
+    , prFocus       = focus
+    , prName        = name
+    , prSession     = Nothing
+    , prSink        = sink
+    , prTrigger     = return ()
+    }
+
+{- ########################################################################################## -}
+
+initCommander :: Commander -> CD ()
+initCommander cmd = lift $ modifyProfiles cmd id 
+
+newCommander  :: (Session -> IO ByteString) -> CmdM () 
+              -> CD (Commander, Sink MacroFilter, Sink HubFilter)
+newCommander profId m = do
   hub         <- newHub
+  macro       <- newMacroFilter
   proVar      <- lift $ newMVar []  
   
   let cmd0 = Commander {
       cmdFocusHook  = \_ -> return ()  
     , cmdHub        = hub
+    , cmdMacroFilt  = macro
     , cmdProcObs    = undefined
     , cmdProfId     = profId
     , cmdProfiles   = proVar
     , cmdSesChan    = undefined
     , cmdSesFilter  = \s -> any (== s) ["dwm", "fmonad", "xfce4-session"] 
     , cmdSesObs     = undefined
+    , cmdSesHook    = return ()
     }
 
   (_, cmd1)   <- lift $ runStateT m cmd0
@@ -190,29 +227,33 @@ newCommander profId m = do
   
   profile0      <- lift $ getFirstProfile cmd2
   lift $ case prSink profile0 of
-    (Just (SinkA s))  -> hubSetSink hub (Sink s)
+    (Just (SinkA s))  -> hubSetSink hub s
     otherwise         -> return ()
   
   lift $ forkIO $ loopSession cmd2
-  return (cmd2, hub)
+  return (cmd2, Sink macro, Sink hub)
+
+{- ########################################################################################## -}
+ 
+loopFocus :: Commander -> Profile -> ChanI FocusEvent -> IO ()
+loopFocus cmd p fc = do
+  e <- readChan fc
+  case e of
+    FocusChanged {} -> onFocusChanged cmd p e >> loopFocus cmd p fc
+    FocusDestroyed  -> return ()
+
+loopSession :: Commander -> IO ()
+loopSession cmd = forever $ do
+  e <- readChan (cmdSesChan cmd)
+  case e of
+    SessionCreated    ses -> onSessionCreated cmd ses
+    SessionDestroyed  ses -> onSessionDestroyed cmd ses 
   
-newProfile :: ByteString -> Maybe SinkA -> IO Profile
-newProfile name sink = do
-  focus <- newIORef newFocusEvent
-  return Profile
-    { prClient      = Nothing
-    , prFocus       = focus
-    , prName        = name
-    , prSession     = Nothing
-    , prSink        = sink
-    , prTrigger     = \_ -> return ()
-    }
-    
 onFocusChanged :: Commander -> Profile -> FocusEvent -> IO ()
 onFocusChanged cmd pr fe = do
   writeIORef (prFocus pr) fe
   active <- isActiveProfile cmd pr
-  when active $ cmdFocusHook cmd fe
+  when active $ evalStateT (cmdFocusHook cmd fe) cmd
 
 onSessionCreated :: Commander -> Session -> IO ()
 onSessionCreated cmd ses = do
@@ -248,7 +289,7 @@ startFocusObserver cmd pr = do
 connectFirst :: [Address] -> IO (Maybe Client)
 connectFirst addrs = loop addrs where
   loop []     = return Nothing
-  loop (a:as) = handle (\(e :: ConnectionError) -> loop as) $ do
+  loop (a:as) = E.handle (\(e :: ConnectionError) -> loop as) $ do
     putStrLn $ "[DBUS] Connecting " ++ (show a)
     connect a >>= return . Just
 

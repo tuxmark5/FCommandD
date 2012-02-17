@@ -1,16 +1,37 @@
 name:           FCommandD
+license:        AllRightsReserved
 version:        0.0.1
 cabal-version:  -any
 build-type:     Simple
-license:        AllRightsReserved
-build-depends:  base -any, binary -any, bindings-DSL -any, bytestring -any, 
-                bytestring-lexing >= 0.3.0, containers -any, directory -any,
-                dbus-core >= 0.9.2.1, haskell98 -any, hinotify >= 0.3.2, ioctl -any, 
-                network -any, parsec -any, text -any,
-                time -any, transformers -any, unix == 2.5.0.0, xhb >= 0.5.2011.10.21
+build-depends:  base              -any, 
+                binary            -any, 
+                bindings-DSL      -any, 
+                bytestring        -any, 
+                bytestring-lexing >= 0.3.0, 
+                containers        -any, 
+                directory         -any,
+                dbus-core         >= 0.9.2.1, 
+                haskell98         -any, 
+                hinotify          >= 0.3.2, 
+                ioctl             -any, 
+                network           -any, 
+                parsec            -any, 
+                text              -any,
+                time              -any, 
+                transformers      -any, 
+                unix              == 2.5.0.0, 
+                xhb               >= 0.5.2011.10.21
 description:    .
 author:         tux_mark_5
+
 executable:     fcommandd
+extensions:     FlexibleContexts,
+                FlexibleInstances, 
+                MultiParamTypeClasses, 
+                ScopedTypeVariables,
+                TypeSynonymInstances, 
+                OverloadedStrings,
+                UndecidableInstances
 main-is:        Main.hs
 buildable:      True
 hs-source-dirs: src

@@ -1,26 +1,46 @@
 module F.CommandD.Action.Run
-( runInSession
-, runInShell
+( run
+, run1
+, runInShellSession
+, runInSession
 ) where
 
 {- ########################################################################################## -}
+import            Control.Monad.Trans.State (gets)
+import            Data.ByteString.Char8 (ByteString)
 import qualified  Data.ByteString.Char8 as B
+import            F.CommandD.Core (lift)
+import            F.CommandD.Observer.ProcessObserver (isProcessRunning)
 import            F.CommandD.Observer.SessionObserver
+import            F.CommandD.Util.Commander
 import            System.Exit (ExitCode(..))
 import            System.Posix
 import            System.Posix.Directory (changeWorkingDirectory)
 {- ########################################################################################## -}
   
-{-runAs :: SessionObserver -> ByteString -> FilePath -> IO ()
-runAs mon sesName cmd = do
-  ses' <- runReaderT (getSession sesName) mon
-  case ses' of
-    Just ses  -> runAsSession ses 1000 cmd
-    Nothing   -> return ()
-    -}
-    
-runInSession :: Session -> CUid -> FilePath -> [String] -> IO ()
-runInSession ses uid cmd args = do
+instance CommandC Commander String where 
+  runCommand cmd s = forkIO_ $ withProfile cmd $ \pro -> runCommand (cmd, pro) s
+instance CommandC (Commander, Profile) String where 
+  runCommand pro s = runCommand pro $ run s []
+
+{- ########################################################################################## -}
+
+run :: String -> [String] -> ProM ()
+run app args = withSession $ \ses -> let
+  run app []    = runInShellSession ses app
+  run app args  = runInSession      ses app args
+  in lift $ run app args
+
+run1 :: ByteString -> ByteString -> ProM ()
+run1 app args = withSession $ \ses -> do
+  cmd <- gets fst
+  r   <- lift $ isProcessRunning (cmdProcObs cmd) app
+  if not r
+    then run (B.unpack $ B.concat [app, args]) []
+    else return ()
+
+runInSession :: Session -> FilePath -> [String] -> IO ()
+runInSession ses cmd args = do
   pid0 <- forkProcess $ do
     createSession
     pid <- forkProcess $ do
@@ -32,8 +52,8 @@ runInSession ses uid cmd args = do
   getProcessStatus True True pid0 -- prevent defunct process
   return ()
   
-runInShell :: Session -> CUid -> String -> IO ()
-runInShell ses uid cmd = runInSession ses 1000 "/usr/bin/sudo" args
-  where args = ["-E", "-b", "-u", "#1000", "/bin/sh", "-c", cmd]
+runInShellSession :: Session -> String -> IO ()
+runInShellSession ses cmd = runInSession ses "/usr/bin/sudo" args
+  where args = ["-E", "-b", "-u", '#':(show $ sesUID ses), "/bin/sh", "-c", cmd]
 
 {- ########################################################################################## -}

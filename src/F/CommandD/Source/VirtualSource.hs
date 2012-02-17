@@ -60,8 +60,8 @@ up k = do
   newEvent evKEY k 0 >>= sendEvent
   newSynEvent        >>= sendEvent
 
-runMacro :: SinkC c => Sink c -> MacroM a -> IO a
-runMacro (Sink s) m = runMacroM (sinkWrite s) m
+runMacro :: SinkC c => MacroM a -> c -> IO a
+runMacro m s = runMacroM (sinkWrite s) m
 
 runMacroM :: CE () -> MacroM a -> IO a
 runMacroM sink m = do

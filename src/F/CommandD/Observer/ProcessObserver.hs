@@ -1,12 +1,13 @@
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE ScopedTypeVariables #-}
-
 module F.CommandD.Observer.ProcessObserver
 ( Environment
+, Process(..)
 , ProcessEvent(..)
 , ProcessObserver(..)
 , getProcCmdLine
 , getProcEnv
+, getProcUid
+, getProcesses
+, isProcessRunning
 , newProcessObserver
 , withINotify
 ) where
@@ -26,26 +27,76 @@ import            F.CommandD.Util.Directory
 import            System.INotify hiding (Event)
 import qualified  System.INotify as I
 import            System.IO
+import            System.Posix (CUid)
+import            System.Posix.Files (fileOwner, getFileStatus)
 {- ########################################################################################## -}
 
-type Environment = [(ByteString, ByteString)]
+type Environment  = [(ByteString, ByteString)]
+
+data Process      = Process
+  { procPid       :: Int
+  , procCmd       :: [ByteString]
+  } deriving (Show)
 
 data ProcessEvent 
-  = ProcessCreated    Int
-  | ProcessDestroyed  Int
+  = ProcessCreated    Process
+  | ProcessDestroyed  Process
 
 data ProcessObserver = ProcessObserver
-  { pmChan        :: ChanO ProcessEvent
-  , pmWakeVar     :: MVar ()
-  , pmWatchDescr  :: [WatchDescriptor]
+  { poChan        :: ChanO ProcessEvent
+  , poProcesses   :: IORef [Process]
+  , poWakeVar     :: MVar ()
+  , poWatchDescr  :: [WatchDescriptor]
   }
+
+instance Eq   Process where (==)    (Process a _) (Process b _) = a == b
+instance Ord  Process where compare (Process a _) (Process b _) = compare a b
+
+{- ########################################################################################## -}
+
+-- infixr 1 +>>
+infixl 1 >>+
+(>>+) :: Monad m => m a -> (a -> b) -> m b
+(>>+) m f = m >>= return . f
+
+getProcesses :: ProcessObserver -> IO [Process]
+getProcesses po = readIORef $ poProcesses po
+
+isProcessRunning :: ProcessObserver -> ByteString -> IO Bool
+isProcessRunning po name = getProcesses po >>= return . any filt where
+  filt (Process _ (name':_))  = name == name'
+  filt _                      = False
+
+monitorLoop :: ProcessObserver -> [Process] -> IO ()
+monitorLoop pm proc0 = do
+  takeMVar (poWakeVar pm)
+  threadDelay 100000
+  proc1 <- queryProcesses >>+ map (\pid -> Process pid []) . sort
+  let (gone, same, new) = diff proc0 proc1
+  new'  <- mapM initProcess new
+  let proc2 = merge same new'
+  forM_ gone $ writeChan (poChan pm) . ProcessDestroyed
+  forM_ new' $ writeChan (poChan pm) . ProcessCreated
+  writeIORef (poProcesses pm) proc2
+  threadDelay 2000000
+  monitorLoop pm proc2
+  
+newProcessObserver :: INotify -> IO (ProcessObserver, ChanI ProcessEvent)
+newProcessObserver inotify = do
+  (chanI, chanO)  <- newChan
+  procs           <- newIORef []
+  wakeVar         <- newEmptyMVar
+  let addW file    = addWatch inotify [Open] file (eventHandler wakeVar)
+  watchDescr      <- mapCatch addW ["/lib/ld-linux.so.2", "/lib64/ld-linux-x86-64.so.2"]
+  let pm = ProcessObserver chanO procs wakeVar watchDescr
+  forkIO $ monitorLoop pm []
+  return (pm, chanI)
+
+{- ########################################################################################## -}
 
 eventHandler :: MVar () -> I.Event -> IO ()
 eventHandler syncVar _ = tryPutMVar syncVar () >> return ()
 
-handle :: a -> IO a -> IO a
-handle a m = E.handle (\(_ :: E.IOException) -> return a) m
-  
 getProcCmdLine :: Int -> IO [ByteString]
 getProcCmdLine pid = handle [] $ do
   cmdline <- readFile' $ concat ["/proc/", show pid, "/cmdline"]
@@ -57,30 +108,17 @@ getProcEnv pid = handle [] $ do
   return $ map1 (dropSnd . B.breakByte 0x3D) (B.split 0 dat)
   where dropSnd (a, b) = (a, B.tail b)
 
-getProcesses :: IO [Int]
-getProcesses = mapDir "/proc" $ \f -> return . readMaybe
+getProcUid :: Int -> IO CUid
+getProcUid pid = handle 1000 $ do
+  stat <- getFileStatus $ concat ["/proc/", show pid, "/cmdline"]
+  return $ fromIntegral $ fileOwner stat
 
-monitorLoop :: ProcessObserver -> [Int] -> IO ()
-monitorLoop pm pids0 = do
-  takeMVar (pmWakeVar pm)
-  threadDelay 100000
-  pids1 <- getProcesses >>= return . sort
-  let (gone, _, new) = diff pids0 pids1
-  forM_ gone $ writeChan (pmChan pm) . ProcessDestroyed
-  forM_ new  $ writeChan (pmChan pm) . ProcessCreated
-  threadDelay 2000000
-  monitorLoop pm pids1
-  
-newProcessObserver :: INotify -> IO (ProcessObserver, ChanI ProcessEvent)
-newProcessObserver inotify = do
-  (chanI, chanO)  <- newChan
-  wakeVar         <- newEmptyMVar
-  let addW file    = addWatch inotify [Open] file (eventHandler wakeVar)
-  watchDescr      <- mapCatch addW ["/lib/ld-linux.so.2", "/lib64/ld-linux-x86-64.so.2"]
-  let pm = ProcessObserver chanO wakeVar watchDescr
-  forkIO $ monitorLoop pm []
-  return (pm, chanI)
-  
+initProcess :: Process -> IO Process
+initProcess (Process pid _) = getProcCmdLine pid >>+ Process pid
+
+queryProcesses :: IO [Int]
+queryProcesses = mapDir "/proc" $ \f -> return . readMaybe
+
 {- ########################################################################################## -}
 
 diff :: Ord a => [a] -> [a] -> ([a], [a], [a])
@@ -91,10 +129,21 @@ diff (a0:r0) (a1:r1) = case compare a0 a1 of
   EQ -> (\(a, b, c) -> (   a, a0:b,    c)) $ diff     r0      r1
   GT -> (\(a, b, c) -> (   a,    b, a1:c)) $ diff (a0:r0)     r1
 
+handle :: a -> IO a -> IO a
+handle a m = E.handle (\(_ :: E.IOException) -> return a) m
+
 map1 :: (a -> b) -> [a] -> [b]
 map1 _ []     = []
 map1 _ [_]    = []
 map1 f (x:xs) = f x : map1 f xs
+
+merge :: (Ord a) => [a] -> [a] -> [a]
+merge l0     []     = l0
+merge []     l1     = l1
+merge (a:ar) (b:br) = case compare a b of
+  LT -> a:merge    ar   (b:br)
+  EQ -> a:merge    ar   (b:br) 
+  GT -> b:merge (a:ar)     br
 
 mapCatch :: (a -> IO b) -> [a] -> IO [b]
 mapCatch k list = sequence (map fun list) >>= return . catMaybes

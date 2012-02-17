@@ -11,6 +11,7 @@ module F.CommandD.Daemon
 , CE(..)
 , Daemon(..)
 , Event(..)
+, Int32
 , Word16
 , daemon
 , forkCD
@@ -21,6 +22,7 @@ module F.CommandD.Daemon
 {- ########################################################################################## -}
 import            Control.Monad.Trans.State (evalStateT)
 import            Data.ByteString.Char8 (ByteString)
+import            Data.Int (Int32)
 import            Data.Word (Word16)
 import            F.CommandD.Core
 import            F.CommandD.Filter.DebugFilter

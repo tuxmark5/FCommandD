@@ -1,7 +1,8 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 module F.CommandD.Util.KeyMap
-( Key(..)
+( Int32
+, Key(..)
 , KeyMap(..)
 , addDev
 , addKey
@@ -9,6 +10,10 @@ module F.CommandD.Util.KeyMap
 , defaultKey
 , defaultKeyMap
 , defaultKeys
+, flagFiltered
+, flagModifier
+, isFiltered
+, isModifier
 , lookupDev
 , lookupDevKey
 , lookupDevKey'
@@ -19,6 +24,7 @@ module F.CommandD.Util.KeyMap
 {- ########################################################################################## -}
 import            Data.ByteString.Char8 (ByteString)
 import qualified  Data.ByteString.Char8 as B
+import            Data.Bits ((.&.), bit)
 import            Data.Int (Int32)
 import            Data.Map (Map)
 import qualified  Data.Map as M
@@ -47,6 +53,21 @@ instance Ord Key where
 
 instance Show Key where
   show key = show $ keyCode key
+
+
+{- ########################################################################################## -}
+
+flagFiltered  :: Int32
+flagModifier  :: Int32
+
+flagFiltered  = bit 0
+flagModifier  = bit 1
+
+isFiltered :: Key -> Bool
+isModifier :: Key -> Bool
+
+isFiltered k = (keyFlag k .&. flagFiltered) /= 0
+isModifier k = (keyFlag k .&. flagModifier) /= 0
               
 {- ########################################################################################## -}
 

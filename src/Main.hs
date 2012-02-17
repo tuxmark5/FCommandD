@@ -4,8 +4,12 @@ import            Control.Concurrent (threadDelay)
 import            Control.Monad (forever, forM_, when)
 import qualified  Data.ByteString.Char8 as B
 import            F.CommandD.Daemon
+import            F.CommandD.Action.Eclipse
 import            F.CommandD.Action.Firefox
 import            F.CommandD.Action.Guayadeque
+import            F.CommandD.Action.Macro
+import            F.CommandD.Action.Mode
+import            F.CommandD.Action.Run
 import            F.CommandD.Action.XMonad
 import            F.CommandD.Source.EVDevSourceDyn
 import            F.CommandD.Source.VirtualSource
@@ -24,15 +28,14 @@ import            System.IO
   * commander: handle session destruction
 
   * evdev hotplug/reload
-  * parse UID from environment
   * TCP source/sink
 
 -}
 
 {- ########################################################################################## -}
 
-run :: String -> String
-run = id
+r :: String -> String
+r = id
 
 {- ########################################################################################## -}
 
@@ -71,6 +74,8 @@ registerKeys = do
   aliasKey "LeftMeta" "B" "Super"
   aliasKey "CapsLock" "B" "Hyper"
   aliasKey "F24"      "B" "FN"
+  aliasKey "@Left"    "N" "ML"
+  aliasKey "@Right"   "N" "MR"
   forM_ (zip bwidKeys0 bwidKeys1) $ \(k0, k1) -> aliasKey k0 "B" (B.pack k1)
   forM_ (zip nagaKeys0 nagaKeys1) $ \(k0, k1) -> aliasKey k0 "N" (B.pack k1)
   
@@ -79,18 +84,22 @@ registerKeys = do
 -- mode to launch applications
 modeApps :: ModeM Commander ()
 modeApps = mode "apps" $ do
-  command "*LeftAlt+F2"       $ run "`dmenu_path | dmenu -b`"
-  command "*Super+B"          $ run "VirtualBox"
-  command "*Super+C"          $ run "urxvt -e python"
-  command "*Super+F*Super+F"  $ run "firefox"
-  command "*Super+F*Super+M"  $ run "Thunar"
-  command "*Super+H"          $ run "krusader --left ~ --right ~"
-  command "*Super+O"          $ run "opera"
-  command "*Super+R"          $ run "transmission-gtk"
-  command "*Super+S"          $ run "skype"
-  command "*Super+T"          $ run "urxvt -e tmux"
-  command "*Super+Y"          $ run "pkexec synaptic"
-  command "*Super+V"          $ run "vmware"
+  command "*LeftAlt+F2"       $ r "`dmenu_path | dmenu -b`"
+  command "!Super+B"          $ r "VirtualBox"
+  command "!Super+C"          $ r "urxvt -e python"
+  command "!Super+F!Super+F"  $ r "firefox"
+  command "!Super+F!Super+M"  $ r "Thunar"
+  command "!Super+G"          $ r "guayadeque"
+  command "!Super+H"          $ r "krusader --left ~ --right ~"
+  command "!Super+O"          $ r "opera"
+  command "!Super+R"          $ r "transmission-gtk"
+  command "!Super+S"          $ r "skype"
+  command "!Super+T"          $ r "urxvt -e tmux"
+  command "!Super+Y"          $ r "pkexec synaptic"
+  command "!Super+V"          $ r "vmware"
+  command "!Super+X!Super+P"  $ r "xterm -e 'xprop && read'"
+  command "!Super+X!Super+X"  $ r "xterm -e '/home/angel/code/app/FCommandD/install.sh'"
+  command "!Super+Z"          $ at "Dl" $ run "zim" [] >> activate
 
 -- mode to control Guayadeque via DBus
 modeGuayadeque :: ModeM Commander ()
@@ -149,16 +158,24 @@ modeXMonad = mode "xmonad" $ do
 
 {- ########################################################################################## -}
 
-fastMouseWheel :: ModeM Commander ()
-fastMouseWheel = do
-  command "+WheelDown:N"          $ rel relWheel (-5)
-  command "+WheelUp:N"            $ rel relWheel ( 5)
-  command "*LeftCtrl+WheelDown:N" $ rel relWheel (-10)
-  command "*LeftCtrl+WheelUp:N"   $ rel relWheel ( 10)
+fastMouseWheel :: Int32 -> ModeM Commander ()
+fastMouseWheel speed = do
+  command "+WheelDown:N"          $ rel relWheel $ -speed
+  command "+WheelUp:N"            $ rel relWheel $  speed
+  command "*LeftCtrl+WheelDown:N" $ rel relWheel $ -speed * 2
+  command "*LeftCtrl+WheelUp:N"   $ rel relWheel $  speed * 2
 
 modeDefault :: ModeM Commander ()
 modeDefault = mode "default" $ do
-  fastMouseWheel
+  fastMouseWheel 5
+
+modeEclipse :: ModeM Commander ()
+modeEclipse = mode "eclipse" $ do
+  fastMouseWheel 5
+  command "!N1+ML"            $ eclipseGoBack
+  command "!N1+MR"            $ eclipseGoForward
+  command "!N2+ML"            $ eclipseOpenDeclaration
+  command "!N2+MR"            $ eclipseFindReferences
 
 modeFirefox :: ModeM Commander ()
 modeFirefox = mode "firefox" $ do
@@ -170,7 +187,7 @@ modeFirefox = mode "firefox" $ do
 
 modeGEdit :: ModeM Commander ()
 modeGEdit = mode "gedit" $ do
-  fastMouseWheel 
+  fastMouseWheel 5
 
 modeKrusader :: ModeM Commander ()
 modeKrusader = mode "krusader" $ do
@@ -191,7 +208,7 @@ modeOpera = mode "opera" $ do
 
 modeSublime :: ModeM Commander ()
 modeSublime = mode "sublime" $ do
-  fastMouseWheel
+  fastMouseWheel 5
 
 modeVMware :: ModeM Commander ()
 modeVMware = mode "vmware" $ do
@@ -200,23 +217,35 @@ modeVMware = mode "vmware" $ do
 modeXTerm :: ModeM Commander ()
 modeXTerm = mode "xterm" $ do
   command "+N1"               $ downUp keyQ
-  fastMouseWheel
+  fastMouseWheel 5
 
 {- ########################################################################################## -}
 
-switcher :: (ByteString -> IO ()) -> WinM ()
-switcher set = do
-  mClass1 "Firefox"             $ set "firefox"
-  mClass0 "gedit"               $ set "gedit"
-  mClass0 "krusader"            $ set "krusader"
-  mClass1 "libreoffice-writer"  $ set "lowriter"
-  mClass1 "MPlayer"             $ set "mplayer"
-  mClass0 "opera"               $ set "opera"  -- CHECK THIS
-  mClass0 "sublime"             $ set "sublime"
-  mClass0 "vmware"              $ set "vmware"
-  mClass0 "xterm"               $ set "xterm"
-  mName "Event Tester"          $ set "xterm"
-  mAny                          $ set "default"
+modeSesDl :: ModeM Commander ()
+modeSesDl = mode "Dl" $ do
+  command "!M1+Grave" $ do
+    at "Dl"   $ xmonadWkSetCurrent "1"
+    at "Main" $ activate
+
+modeSesMain :: ModeM Commander ()
+modeSesMain = mode "Main" $ do
+  command "!M1+Grave" $ nextSession
+
+{- ########################################################################################## -}
+
+switcher = do
+  mClass0 "Eclipse"             $ setModeLSX "eclipse"
+  mClass1 "Firefox"             $ setModeLSX "firefox"
+  mClass0 "gedit"               $ setModeLSX "gedit"
+  mClass0 "krusader"            $ setModeLSX "krusader"
+  mClass1 "libreoffice-writer"  $ setModeLSX "lowriter"
+  mClass1 "MPlayer"             $ setModeLSX "mplayer"
+  mClass0 "opera"               $ setModeLSX "opera"
+  mClass0 "sublime"             $ setModeLSX "sublime"
+  mClass0 "vmware"              $ setModeLSX "vmware"
+  mClass0 "xterm"               $ setModeLSX "xterm"
+  mName "Event Tester"          $ setModeLSX "xterm"
+  mAny                          $ setModeLSX "default"
 
 {- ########################################################################################## -}
 
@@ -226,18 +255,20 @@ main = daemon $ do
   evdev       <- mkEVDevSourceDyn mdev
   uinput0     <- mkUInputSink "UInput: Primary"
   uinput1     <- mkUInputSink "UInput: DisplayLink"
-  macro       <- newMacroFilter
   debug       <- mkDebugFilter
   
-  (cmd, hub)  <- newCommander sesId $ do
-    addSink "Main"  uinput0
-    addSink "Dl"    uinput1
-    setModeSwitcher macro switcher
-    setSessionFilter sesFilt
+  (cmd, macro, hub)  <- newCommander sesId $ do
+    addSink "Main"  uinput0 $ return () 
+    addSink "Dl"    uinput1 $ return ()
+    setFocusHook          $ modeSwitcher switcher
+    setSessionFilter      $ sesFilt
+    setSessionSwitchHook  $ enableSessionMode
   
   runMode macro cmd $ do
     registerKeys
-    command "*FN+Compose" $ nextProfile cmd
+    command "!M1+ESC"     $ nextSession
+    command "*Hyper+F11"  $ run1 "gnome-calculator" ""
+    command "*Hyper+F12"  $ toggleModes2 ["local"] ["test"] 
 
     mode "global" $ do
       modeApps
@@ -247,6 +278,7 @@ main = daemon $ do
 
     mode "local" $ do
       modeDefault
+      modeEclipse
       modeFirefox
       modeGEdit
       modeKrusader
@@ -256,9 +288,19 @@ main = daemon $ do
       modeSublime
       modeVMware
       modeXTerm
+
+    mode "session" $ do
+      modeSesMain
+      modeSesDl
+
+    mode0 "test" $ do
+      command "+N1" $ xmonadWkSetCurrentG "0_1"
   
   evdev >>> macro >>> hub
+  initCommander cmd
+
   lift $ putStrLn "[*] Initialized ..."
-  lift $ forever $ threadDelay 500000000
+  lift $ forever $ threadDelay 50000000
+  -- lift $ threadDelay 5000000
 
 {- ########################################################################################## -}

@@ -27,13 +27,13 @@ instance SinkC HubFilter where
       
 {- ########################################################################################## -}
     
-hubSetSink :: SinkC s => Sink HubFilter -> Sink s -> IO ()
-hubSetSink (Sink (HubFilter var)) (Sink s) = do
+hubSetSink :: SinkC s => HubFilter -> s -> IO ()
+hubSetSink (HubFilter var) s = do
   writeIORef var (Just $ SinkA s)
   
-newHub :: CD (Filter HubFilter)
+newHub :: CD HubFilter
 newHub = lift $ do
   ref <- newIORef Nothing
-  return $ Sink $ HubFilter ref
+  return $ HubFilter ref
 
 {- ########################################################################################## -}

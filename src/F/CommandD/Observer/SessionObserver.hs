@@ -33,6 +33,7 @@ import            F.CommandD.Core
 import            F.CommandD.Observer.ProcessObserver
 import            F.CommandD.Util.Chan
 import            System.IO
+import            System.Posix (CUid)
 import            System.Posix.Env (setEnv)
 import            System.Posix.IO (closeFd)
 {- ########################################################################################## -}
@@ -42,7 +43,8 @@ data Session = Session
   , sesDisplay          :: ByteString
   , sesEnvironment      :: Environment
   , sesHome             :: ByteString
-  , sesPID              :: Int
+  , sesProc             :: Process
+  , sesUID              :: CUid
   , sesXAuthority       :: ByteString
   }
   
@@ -63,56 +65,19 @@ type SesM a = ReaderT SessionObserver IO a
 
 addSession :: Session -> SesM ()
 addSession ses = ask >>= \s -> lift $ do
-  modifyIORef (soSessions s) $ M.insert (sesPID ses) ses
+  modifyIORef (soSessions s) $ M.insert (procPid $ sesProc $ ses) ses
   writeChan (soChan s) (SessionCreated ses)
   
 exportSessionVar :: Session -> ByteString -> IO ()
 exportSessionVar ses var = setEnv (B.unpack $ var) (B.unpack $ getSessionVar ses var) True
-  
--- TODO: migrate to ByteStrings
-getEnvironmentPairs :: Session -> [(String, String)]
-getEnvironmentPairs = map (\(a, b) -> (B.unpack a, B.unpack b)) . sesEnvironment
-  
-getProcSession :: Int -> SesM Session
-getProcSession pid = lift $ do
-  env <- getProcEnv pid
-  return $ foldl folder newSession
-    { sesEnvironment  = env
-    , sesPID          = pid
-    } env where
-  folder s ("DBUS_SESSION_BUS_ADDRESS", v)  = s { sesAddress    = v }
-  folder s ("DISPLAY",                  v)  = s { sesDisplay    = B.take 2 v }
-  folder s ("HOME",                     v)  = s { sesHome       = v }
-  folder s ("XAUTHORITY",               v)  = s { sesXAuthority = v }
-  folder s _                                = s
     
 getSession :: ByteString -> SesM (Maybe Session)
 getSession name = asks soSessions >>= \sesVar -> lift $ do
   readIORef sesVar >>= return . find' (\v -> sesDisplay v == name)
-  
-getSessionVar :: Session -> ByteString -> ByteString
-getSessionVar ses var = fromMaybe "" $ lookup var (sesEnvironment ses)
 
-handleProcessCreated :: Int -> SesM ()
-handleProcessCreated pid = do
-  matchSession pid >>= \m -> when m $ do
-    ses1  <- getProcSession pid
-    ses0' <- getSession (sesDisplay ses1)
-    case ses0' of
-      Just _    -> return ()
-      Nothing   -> addSession ses1
-
-handleProcessDestroyed :: Int -> SesM ()
-handleProcessDestroyed pid = ask >>= \obs -> do
-  ses <- removeSession pid
-  case ses of
-    Just ses'   -> lift $ writeChan (soChan obs) $ SessionDestroyed ses'
-    Nothing     -> return ()
-      
-matchSession :: Int -> SesM Bool
-matchSession pid = ask >>= \s -> lift $ do
-  line <- getProcCmdLine pid
-  return $ case line of
+matchSession :: Process -> SesM Bool
+matchSession p = ask >>= \s -> lift $ do
+  return $ case procCmd p of
     cmd:_     -> soSessionFilter s cmd
     otherwise -> False
     
@@ -127,8 +92,8 @@ monitorLoop :: SesM ()
 monitorLoop = ask >>= \obs -> forever $ do
   event <- lift $ readChan (soProcChan obs)
   case event of
-    ProcessCreated    pid -> handleProcessCreated pid
-    ProcessDestroyed  pid -> handleProcessDestroyed pid
+    ProcessCreated    p -> onProcessCreated p
+    ProcessDestroyed  p -> onProcessDestroyed p
     
 newSession :: Session
 newSession = Session
@@ -136,7 +101,8 @@ newSession = Session
   , sesDisplay      = ""
   , sesHome         = "/"
   , sesEnvironment  = []
-  , sesPID          = 0
+  , sesProc         = Process 0 []
+  , sesUID          = 0
   , sesXAuthority   = ""
   } 
 
@@ -147,12 +113,52 @@ newSessionObserver pchan sfilt = do
   let so = SessionObserver chanO pchan sfilt sessions
   forkIO $ runReaderT monitorLoop so
   return (so, chanI)
-  
+
+onProcessCreated :: Process -> SesM ()
+onProcessCreated p = do
+  matchSession p >>= \m -> when m $ do
+    ses1  <- getProcSession p
+    ses0' <- getSession (sesDisplay ses1)
+    case ses0' of
+      Just _    -> return ()
+      Nothing   -> addSession ses1
+
+onProcessDestroyed :: Process -> SesM ()
+onProcessDestroyed p = ask >>= \obs -> do
+  ses <- removeSession $ procPid p
+  case ses of
+    Just ses'   -> lift $ writeChan (soChan obs) $ SessionDestroyed ses'
+    Nothing     -> return ()
+      
 removeSession :: Int -> SesM (Maybe Session)
 removeSession pid = modifySessions mod where
   mod s = case M.lookup pid s of
     Just ses  -> (M.delete pid s, Just ses)
     Nothing   -> (s, Nothing)
+
+{- ########################################################################################## -}
+
+-- TODO: migrate to ByteStrings
+getEnvironmentPairs :: Session -> [(String, String)]
+getEnvironmentPairs = map (\(a, b) -> (B.unpack a, B.unpack b)) . sesEnvironment
+
+getProcSession :: Process -> SesM Session
+getProcSession proc = lift $ do
+  env <- getProcEnv $ procPid proc
+  uid <- getProcUid $ procPid proc
+  return $ foldl folder newSession
+    { sesEnvironment  = env
+    , sesProc         = proc
+    , sesUID          = uid
+    } env where
+  folder s ("DBUS_SESSION_BUS_ADDRESS", v)  = s { sesAddress    = v }
+  folder s ("DISPLAY",                  v)  = s { sesDisplay    = B.take 2 v }
+  folder s ("HOME",                     v)  = s { sesHome       = v }
+  folder s ("XAUTHORITY",               v)  = s { sesXAuthority = v }
+  folder s _                                = s
+
+getSessionVar :: Session -> ByteString -> ByteString
+getSessionVar ses var = fromMaybe "" $ lookup var (sesEnvironment ses)
 
 {- ########################################################################################## -}
     

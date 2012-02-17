@@ -6,22 +6,25 @@
 module F.CommandD.Filter.MacroFilter
 ( CommandC(..)
 , MacroFilter(..)
+, Mode(..)
 , ModeM
 , aliasDev
 , aliasKey
 , command
-, enableMode
-, enableXMode
+, commandN
 , newMacroFilter
 , mode
+, mode0
 , runMode
+, withMode
+, withRootMode
 ) where
 
 {- ########################################################################################## -}
 import            Control.Concurrent (forkIO)
 import            Control.Concurrent.MVar
 import            Control.Monad (forM_, replicateM_, sequence_, when)
-import            Control.Monad.Trans.State (State(..), StateT(..), evalStateT)
+import            Control.Monad.Trans.State (State(..), StateT(..), evalStateT, gets)
 import qualified  Control.Monad.Trans.State as S
 import            Data.ByteString.Char8 (ByteString)
 import qualified  Data.ByteString.Char8 as B
@@ -42,6 +45,7 @@ type MacroFilter = MVar MacroFilterS
   
 data MacroFilterS = MacroFilterS
   { mfsActions      :: [IO ()] 
+  , mfsFiltered     :: Bool
   , mfsFilteredKeys :: [Key]
   , mfsKeyMap       :: KeyMap
   , mfsModes        :: [Mode]
@@ -66,8 +70,8 @@ instance SinkC MacroFilter where
 class CommandC s a where
   runCommand :: s -> a -> IO ()
 
-instance CommandC s (IO ()) where
-  runCommand _  m = forkIO m >> return ()
+instance CommandC a (IO ()) where
+  runCommand _ a = forkIO a >> return ()
 
 data Mode = Mode
   { modeChildren  :: [Mode]
@@ -105,16 +109,6 @@ collectModes mode = do
     then mapM collectModes (modeChildren mode) >>= return . (mode:) . concat
     else return []
 
-enableMode :: Sink MacroFilter -> [ByteString] -> Bool -> IO ()
-enableMode mf name e = withMode mf name $ \m -> writeIORef (modeEnabled m) e
-
-enableMode' :: Mode -> Bool -> IO ()
-enableMode' m e = writeIORef (modeEnabled m) e
-
-enableXMode :: Sink MacroFilter -> [ByteString] -> ByteString -> IO ()
-enableXMode mf path name = withMode mf path $ \mode -> do
-  forM_ (modeChildren mode) $ \m -> enableMode' m (modeName m == name)
-
 resetModes' :: MacroFilterS -> IO MacroFilterS
 resetModes' s = do
   modes <- collectModes (mfsRootMode s)
@@ -132,21 +126,27 @@ findMode m (a:rest) = case findModeChild m a of
 findModeChild :: Mode -> ByteString -> Maybe Mode
 findModeChild mode name = find (\m -> modeName m == name) (modeChildren mode)
 
-newMode :: ByteString -> IO Mode
-newMode name = do
-  enabled <- newIORef True
+newMode :: ByteString -> Bool -> IO Mode
+newMode name enabled = do
+  enabled <- newIORef enabled 
   return $ Mode
     { modeChildren  = []
     , modeEnabled   = enabled
     , modeName      = name
     , modeRootNode  = defaultNode
     }
-    
+
 mode :: ByteString -> ModeM s a -> ModeM s a
-mode name m = StateT $ \ms -> do
-  newMode0  <- newMode name
+mode name m = mode' name True m
+
+mode0 :: ByteString -> ModeM s a -> ModeM s a
+mode0 name m = mode' name False m
+
+mode' :: ByteString -> Bool -> ModeM s a -> ModeM s a
+mode' name e m = StateT $ \ms -> do
+  newMode0  <- newMode name e
   (a, ms1)  <- runStateT m ms { msMode = newMode0 }
-  return (a, ms { msMode = addMode (msMode ms) (msMode ms1) })
+  return (a, ms { msMode = addMode (msMode ms) (msMode ms1) }) 
 
 runMode :: Filter MacroFilter -> s -> ModeM s a -> CD a
 runMode (Sink f) s m = lift $ modifyMVar f $ \dat0 -> do
@@ -166,11 +166,15 @@ printMode i mode = do
   forM_ (modeChildren mode) $ printMode (i + 1)
   printNode (i + 1) (modeRootNode mode)
 
-withMode :: Filter MacroFilter -> [ByteString] -> (Mode -> IO ()) -> IO ()
-withMode (Sink mf) path m = modifyMVar_ mf $ \s -> do 
-  case findMode (mfsRootMode s) path of
-    Just mode -> m mode >> resetModes' s
-    Nothing   -> return s
+withMode :: Mode -> [ByteString] -> (Mode -> IO ()) -> IO ()
+withMode root path m = case findMode root path of
+  Just mode -> m mode 
+  Nothing   -> return ()
+
+withRootMode :: MacroFilter -> (Mode -> IO ()) -> IO ()
+withRootMode mf m = modifyMVar_ mf $ \s -> do 
+  m $ mfsRootMode s
+  resetModes' s
 
 {- ########################################################################################## -}
 
@@ -207,15 +211,17 @@ printNode i node = do
 
 testNode :: Int -> Node -> MacroM ()
 testNode 0 node = do
-  when ((not $ isLeafNode node) && (keyFlag (nodeKey node) == 0)) $ do
-    appendNode node
-  case (nodeAction node) of
-    Just act  -> appendAction act
+  case nodeAction node of
+    Just act  -> appendAction act 
     Nothing   -> return ()
+  when ((not $ isLeafNode node) && (not $ isModifier $ nodeKey node)) $ do
+    appendNode node
   
 testNode depth node = 
   forM_ (nodeChildren node) $ \n -> do
-    isKeyPressed (nodeKey n) >>= \p -> when p $ do
+    p <- isKeyPressed (nodeKey n)
+    when p $ do
+      when (isFiltered $ nodeKey n) filterKey
       testNode (depth - 1) n
 
 testNodes :: MacroM ()
@@ -225,22 +231,20 @@ testNodes = removeNodes $ \nodes -> do
 
 removeNodes :: ([Node] -> MacroM a) -> MacroM a
 removeNodes fun = S.get >>= \s0 -> do
-  S.put s0 { mfsNodes = [] }
+  S.put s0 { mfsFiltered = False, mfsNodes = [] }
   fun $ mfsNodes s0
 
 resetNodes :: MacroM Bool
 resetNodes = do
   s0 <- S.get
-  let (n1, r)   = mod (mfsActions s0) (mfsNodes s0)
-      mod [] [] = (map modeRootNode $ mfsModes s0, False)
-      mod _  [] = (map modeRootNode $ mfsModes s0, True)
-      mod _  n  = (n, True)
+  let n1 = mod (mfsNodes s0)
+      mod [] = (map modeRootNode $ mfsModes s0)
+      mod n  = (n)
   S.put s0 { mfsNodes = n1 }
-  return r
+  return $ mfsFiltered s0
 
 {- ########################################################################################## -}
   
---type MacroM a = State MacroFilterS a
 type MacroM a = StateT MacroFilterS IO a
 
 appendAction :: IO () -> MacroM ()
@@ -248,6 +252,9 @@ appendAction action = S.modify $ \s -> s { mfsActions = action:(mfsActions s) }
 
 appendEvent :: Event -> CE ()
 appendEvent e1 = ContST $ \e0 c -> c e0 () >> c e1 ()
+
+filterKey :: MacroM ()
+filterKey = S.modify $ \s -> s { mfsFiltered = True }
 
 isKeyFiltered :: Key -> MacroM Bool
 isKeyFiltered key = S.gets mfsFilteredKeys >>= return . any (== key) 
@@ -295,8 +302,7 @@ processRelEvent e = do
   modifyPressedKeys $ \   keys  -> key:keys
   testNodes
   modifyPressedKeys $ \(k:keys) ->     keys
-  f <- resetNodes
-  return f
+  resetNodes
 
 removeFilteredKey :: Key -> MacroM Bool
 removeFilteredKey k = do
@@ -368,11 +374,23 @@ command combo cmd = S.get >>= \ms0 -> do
       io = runCommand (msState ms0) cmd
       in S.put $ ms0 { msMode = addMacro (msMode ms0) io seq }
   
-newMacroFilter :: CD (Filter MacroFilter)
+commandN :: CommandC s c => String -> [c] -> ModeM s ()
+commandN combo c = do
+  ref     <- lift $ newMVar c
+  state   <- gets msState
+  command combo $ cycleCommand state ref
+
+cycleCommand :: CommandC s c => s -> MVar [c] -> IO ()
+cycleCommand state cmds = do
+  c0 <- modifyMVar cmds $ \(a:r) -> return (r ++ [a], a)
+  runCommand state c0
+
+newMacroFilter :: CD MacroFilter
 newMacroFilter = lift $ do
-  mode  <- newMode ""
+  mode  <- newMode "" True
   ref   <- newMVar MacroFilterS
     { mfsActions      = []
+    , mfsFiltered     = False
     , mfsFilteredKeys = []
     , mfsKeyMap       = defaultKeyMap
     , mfsModes        = []
@@ -381,7 +399,7 @@ newMacroFilter = lift $ do
     , mfsRootMode     = mode
     , mfsSupressed    = []
     }
-  return $ Sink ref
+  return ref
   
 {- ########################################################################################## -}
 
@@ -389,5 +407,8 @@ alter :: (Maybe a -> a) -> (a -> Bool) -> [a] -> [a]
 alter mod _    []                   = [mod Nothing]
 alter mod pred (a:rest) | pred a    = (mod $ Just a):rest
                         | otherwise = a:(alter mod pred rest)
+
+forAnyM :: Monad m => [a] -> (a -> m Bool) -> m Bool
+forAnyM list p = mapM p list >>= return . or
   
 {- ########################################################################################## -}
