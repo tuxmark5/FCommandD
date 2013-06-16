@@ -32,10 +32,8 @@ import            Data.IORef
 import            Data.List (find)
 import            Data.Maybe (fromJust)
 import            Data.Text.Encoding (decodeUtf8)
-import            DBus.Address
-import            DBus.Client (Client, connect)
-import            DBus.Connection (ConnectionError(..))
-import            DBus.Types
+import            DBus
+import            DBus.Client
 import            F.CommandD.Core hiding (get)
 import            F.CommandD.Filter.HubFilter
 import            F.CommandD.Filter.MacroFilter
@@ -275,7 +273,7 @@ onSessionCreated cmd ses = do
 
   putStrLn $ show $ sesDisplay ses  
   -- Connect to DBus
-  let (Just ad)  = addresses $ decodeUtf8 $ sesAddress ses
+  let (Just ad)  = parseAddresses $ B.unpack $ sesAddress ses -- decodeUtf8
   putStrLn "Connected to DBUS0"
   client        <- connectFirst ad
   putStrLn "Connected to DBUS"
@@ -309,7 +307,7 @@ startFocusObserver cmd pr = do
 connectFirst :: [Address] -> IO (Maybe Client)
 connectFirst addrs = loop addrs where
   loop []     = return Nothing
-  loop (a:as) = E.handle (\(e :: ConnectionError) -> loop as) $ do
+  loop (a:as) = E.handle (\(e :: ClientError) -> loop as) $ do
     putStrLn $ "[DBUS] Connecting " ++ (show a)
     connect a >>= return . Just
 

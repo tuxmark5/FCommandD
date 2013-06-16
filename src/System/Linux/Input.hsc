@@ -102,13 +102,13 @@ module System.Linux.Input
 import Data.Binary
 import Data.Int
 import Data.Word
-import Foreign.C.Types (CInt, CLong)
+import Foreign.C.Types (CInt(..), CLong)
 import Foreign.Marshal.Alloc (alloca)
 import Foreign.Ptr
 import Foreign.Storable
 import System.Posix.IO (fdReadBuf, fdWriteBuf)
 import System.Posix.IOCtl
-import System.Posix.Types (Fd)
+import System.Posix.Types (Fd(..))
 {- ########################################################################################## -}
 #include <bindings.dsl.h>
 #include <linux/input.h>

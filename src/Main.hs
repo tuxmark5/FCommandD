@@ -320,7 +320,7 @@ switcher = do
 
 main :: IO ()
 main = daemon $ do
-  lift $ putStrLn "[*] Starting ..."
+  lift $ putStrLn "[*] Starting 2 ..."
   evdev       <- mkEVDevSourceDyn mdev
   uinput0     <- mkUInputSink "UInput: Primary"
   uinput1     <- mkUInputSink "UInput: DisplayLink"

@@ -14,9 +14,8 @@ module F.CommandD.Action.DBus
 import            Control.Monad.Trans.State (gets)
 import qualified  Data.ByteString.Char8 as B
 import qualified  Data.Set as S
-import            DBus.Client hiding (call)
-import            DBus.Message (Flag(..), MethodCall(..))
-import            DBus.Types
+import            DBus hiding (call)
+import            DBus.Client (call_)
 import            F.CommandD.Core (lift)
 import            F.CommandD.Util.Commander
 {- ########################################################################################## -}
@@ -35,12 +34,8 @@ call c = gets snd >>= \p -> lift $ do
     Nothing       -> B.putStrLn $ B.concat ["No client for this profile: ", prName p]
 
 newCall :: BusName -> ObjectPath -> InterfaceName -> MemberName -> [Variant] -> MethodCall
-newCall dst p i m a = MethodCall
-  { methodCallPath        = p
-  , methodCallMember      = m
-  , methodCallInterface   = Just i
-  , methodCallDestination = Just dst
-  , methodCallFlags       = S.fromList []
+newCall dst p i m a = (methodCall p i m)
+  { methodCallDestination = Just dst
   , methodCallBody        = a
   }
 
