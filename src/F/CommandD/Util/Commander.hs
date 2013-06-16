@@ -192,22 +192,11 @@ newProfile name sink = do
 initCommander :: Commander -> CD ()
 initCommander cmd = lift $ modifyProfiles cmd id 
 
-eql0 :: ByteString -> Bool
-eql0 s = any (== s) 
-  [ "dwm"
-  , "i3"
-  , "/usr/bin/i3"
-  , "fmonad"
-  , "/home/angel/.cabal/bin/fmonad"
-  , "lxpanel"
-  ]
-
-eql1 :: ByteString -> Bool
-eql1 s = any eql0 $ B.split '/' s
-
-newCommander  :: (Session -> IO ByteString) -> CmdM () 
+newCommander  :: (ByteString -> Bool)
+              -> (Session -> IO ByteString) 
+              -> CmdM () 
               -> CD (Commander, Sink MacroFilter, Sink HubFilter)
-newCommander profId m = do
+newCommander sesFilt profId m = do
   hub         <- newHub
   macro       <- newMacroFilter
   proVar      <- lift $ newMVar []  
@@ -220,7 +209,7 @@ newCommander profId m = do
     , cmdProfId     = profId
     , cmdProfiles   = proVar
     , cmdSesChan    = undefined
-    , cmdSesFilter  = eql0
+    , cmdSesFilter  = sesFilt
     , cmdSesObs     = undefined
     , cmdSesHook    = return ()
     }

@@ -60,10 +60,14 @@ mdev _      _       = return (-1)
 
 -- Filter session processes
 sesFilt :: ByteString -> Bool
-sesFilt "dwm"             = True
-sesFilt "fmonad"          = True
-sesFilt "xfce4-session"   = True
-sesFilt _                 = False
+sesFilt s = any (== s) 
+  [ "dwm"
+  , "i3"
+  , "/usr/bin/i3"
+  , "fmonad"
+  , "/home/angel/.cabal/bin/fmonad"
+  , "lxpanel"
+  ]
 
 -- Name sessions based on DISPLAY environment variable
 sesId :: Session -> IO ByteString
@@ -288,12 +292,14 @@ modeXTerm = mode "xterm" $ do
 
 {- ########################################################################################## -}
 
+-- a mode for utility session
 modeSesDl :: ModeM Commander ()
 modeSesDl = mode "Dl" $ do
   command "!M1+Grave" $ do
     at "Dl"   $ xmonadWkSetCurrent "A0"
     at "Main" $ activate
 
+-- a mode to switch between sessions
 modeSesMain :: ModeM Commander ()
 modeSesMain = mode "Main" $ do
   command "!M1+Grave" $ nextSession
@@ -326,11 +332,10 @@ main = daemon $ do
   uinput1     <- mkUInputSink "UInput: DisplayLink"
   debug       <- mkDebugFilter
   
-  (cmd, macro, hub)  <- newCommander sesId $ do
+  (cmd, macro, hub)  <- newCommander sesFilt sesId $ do
     addSink "Main"  uinput0 $ return () 
     addSink "Dl"    uinput1 $ return ()
     setFocusHook          $ modeSwitcher switcher
-    --setSessionFilter      $ sesFilt
     setSessionSwitchHook  $ enableSessionMode
   
   runMode macro cmd $ do
