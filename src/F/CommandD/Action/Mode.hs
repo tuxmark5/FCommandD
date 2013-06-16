@@ -4,7 +4,7 @@ module F.CommandD.Action.Mode
 , setMode
 , setModeLSX
 , setModeSX
-, toggleModes2
+, toggleModes
 ) where
 
 {- ########################################################################################## -}
@@ -48,10 +48,9 @@ setModeSX = do
   lift $ withRootMode (cmdMacroFilt cmd) $ \root -> do
     withMode root ["session"] $ setModeX' name
 
-toggleModes2 :: [ByteString] -> [ByteString] -> CmdM ()
-toggleModes2 m1 m2 = withMacroMode $ \root -> do
-  withMode root m1 $ toggleMode'
-  withMode root m2 $ toggleMode'
+toggleModes :: [[ByteString]] -> CmdM ()
+toggleModes modes = withMacroMode $ \root -> do
+  forM_ modes $ \m ->  withMode root m $ toggleMode'
 
 {- ########################################################################################## -}
 

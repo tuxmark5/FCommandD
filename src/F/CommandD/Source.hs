@@ -21,7 +21,9 @@ class SourceC a where
   sourceRead _ = return undefined
   
   sourceRun  :: a -> (Event -> CD ()) -> CD ()
-  sourceRun s ef = forkCD $ catchCD $ forever $ sourceRead s >>= ef 
+  sourceRun s ef = forkCD $ do
+    catchCD $ forever $ sourceRead s >>= ef
+    catchCD $ forever $ sourceRead s >>= ef 
   
 data SourceC a => Source a = Source a
 

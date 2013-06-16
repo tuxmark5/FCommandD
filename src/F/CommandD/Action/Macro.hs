@@ -18,6 +18,9 @@ instance CommandC (Commander, Profile) (MacroM ()) where
 
 {- ########################################################################################## -}
 
+-- TODO: should dump this into hub and not into current profile's sink
+-- TODO: ideally should drop to NEXT of invocation
+
 macro :: MacroM () -> ProM ()
 macro m = gets snd >>= \p -> lift $ case prSink p of
   Just (SinkA s)  -> runMacro m s

@@ -65,7 +65,9 @@ type SesM a = ReaderT SessionObserver IO a
 
 addSession :: Session -> SesM ()
 addSession ses = ask >>= \s -> lift $ do
+  putStrLn $ "ZEX " ++ (show  $ sesProc ses)
   modifyIORef (soSessions s) $ M.insert (procPid $ sesProc $ ses) ses
+  putStrLn $ "ZEX2 " ++ (show  $ sesProc ses)
   writeChan (soChan s) (SessionCreated ses)
   
 exportSessionVar :: Session -> ByteString -> IO ()

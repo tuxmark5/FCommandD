@@ -1,14 +1,20 @@
+{-# LANGUAGE IncoherentInstances #-}
+{-# LANGUAGE OverlappingInstances #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 import            Control.Concurrent (threadDelay)
-import            Control.Monad (forever, forM_, when)
+import            Control.Monad (forever, forM_, replicateM_, when)
 import qualified  Data.ByteString.Char8 as B
 import            F.CommandD.Daemon
+import qualified  F.CommandD.Device.CyborgMMO7 as C
 import            F.CommandD.Action.Eclipse
 import            F.CommandD.Action.Firefox
 import            F.CommandD.Action.Guayadeque
+import            F.CommandD.Action.I3 
 import            F.CommandD.Action.Macro
 import            F.CommandD.Action.Mode
+import            F.CommandD.Action.NetBeans
+import            F.CommandD.Action.RubyMine
 import            F.CommandD.Action.Run
 import            F.CommandD.Action.XMonad
 import            F.CommandD.Source.EVDevSourceDyn
@@ -23,12 +29,17 @@ import            System.IO
   * add dbus policy for root
 
   TODO:
-  * manual mode override with suspended switcher / toggle
   * run outside session
   * commander: handle session destruction
 
   * evdev hotplug/reload
   * TCP source/sink
+  * dynamic nodes? vim like stuff
+
+  TODO:
+  * persistenly pressed keys
+  * held key
+  * double/tripple clicks
 
 -}
 
@@ -43,6 +54,8 @@ r = id
 mdev :: Word16 -> Word16 -> IO SourceId
 mdev 0x1532 0x010d  = return 0      -- BlackWidow
 mdev 0x1532 0x001f  = return 1      -- Naga
+mdev 0x1532 0x0021  = return 1      -- Naga
+mdev 0x06A3 0x0CD0  = return 1      -- Cyborg
 mdev _      _       = return (-1)
 
 -- Filter session processes
@@ -62,6 +75,7 @@ sesId _                             = return "Main"
 -- rename Razer BlackWidow M1-M5 keys
 bwidKeys0 = ["F13", "F14", "F15", "F16", "F17"]
 bwidKeys1 = ["M1" , "M2" , "M3" , "M4" , "M5" ]
+
 -- rename Razer Naga Epic 1-12 keys
 nagaKeys0 = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0", "Minus", "Equal"]
 nagaKeys1 = map (\i -> "N" ++ (show i)) [1..12]
@@ -76,8 +90,9 @@ registerKeys = do
   aliasKey "F24"      "B" "FN"
   aliasKey "@Left"    "N" "ML"
   aliasKey "@Right"   "N" "MR"
-  forM_ (zip bwidKeys0 bwidKeys1) $ \(k0, k1) -> aliasKey k0 "B" (B.pack k1)
-  forM_ (zip nagaKeys0 nagaKeys1) $ \(k0, k1) -> aliasKey k0 "N" (B.pack k1)
+  forM_ (zip bwidKeys0 bwidKeys1)     $ \(k0, k1) -> aliasKey  k0 "B" (B.pack k1)
+  forM_ (zip nagaKeys0 nagaKeys1)     $ \(k0, k1) -> aliasKey  k0 "N" (B.pack k1)
+  forM_ C.keys $ \(k0, k1) -> aliasKey' k0 "N" (B.pack $ 'C':k1)
   
 {- ########################################################################################## -}
   
@@ -94,20 +109,26 @@ modeApps = mode "apps" $ do
   command "!Super+O"          $ r "opera"
   command "!Super+R"          $ r "transmission-gtk"
   command "!Super+S"          $ r "skype"
-  command "!Super+T"          $ r "urxvt -e tmux"
+  command "!Super+T"          $ r "xterm" --  "urxvt -e tmux"
   command "!Super+Y"          $ r "pkexec synaptic"
   command "!Super+V"          $ r "vmware"
   command "!Super+X!Super+P"  $ r "xterm -e 'xprop && read'"
   command "!Super+X!Super+X"  $ r "xterm -e '/home/angel/code/app/FCommandD/install.sh'"
   command "!Super+Z"          $ at "Dl" $ run "zim" [] >> activate
 
+  command "!Super+PageDown"   $ r "lxsession-logout"
+
 -- mode to control Guayadeque via DBus
 modeGuayadeque :: ModeM Commander ()
 modeGuayadeque = mode "guayadeque" $ do
-  command "+NextSong"         $ gdqNext
-  command "+PlayPause"        $ gdqPlayPause
-  command "+PreviousSong"     $ gdqPrev
-  command "+StopCD"           $ gdqStop
+  command "*FN+NextSong"      $ gdqNext
+  command "*FN+PlayPause"     $ gdqPlayPause
+  command "*FN+PreviousSong"  $ gdqPrev
+  command "*FN+StopCD"        $ gdqStop
+
+  command "*CS+CWest"         $ gdqPrev
+  command "*CS+CCenter"       $ gdqPlayPause
+  command "*CS+CEast"         $ gdqNext
 
   command "*Hyper+N10"        $ gdqPrev
   command "*Hyper+N11"        $ gdqPlayPause
@@ -118,12 +139,43 @@ modeVolume = mode "volume" $ do
   command "*Hyper+WheelDown:N"  $ downUp keyVolumeDown
   command "*Hyper+WheelUp:N"    $ downUp keyVolumeUp
 
+modeI3 :: ModeM Commander ()
+modeI3 = mode "i3" $ do
+  -- Directional window navigation
+  forM_ (zip "ADWS" ["left", "right", "up", "down"]) $ \(key, dir) -> do
+    let c mod pref = command (mod ++ [key]) $ i3Cmd $ concat [pref, " ", dir]
+    c "*LeftAlt+"               "focus"
+    c "*LeftAlt*LeftShift+"     "move"
+
+  -- Layouts
+  command "*LeftAlt+1"    $ i3Cmd "split h"
+  command "*LeftAlt+2"    $ i3Cmd "split v"
+  command "*LeftAlt+Q"    $ i3Cmd "focus parent"
+  command "*LeftAlt+E"    $ i3Cmd "focus child"
+  command "*LeftAlt+Z"    $ i3Mode "resize"
+
+  command "*Hyper+F1"     $ i3Cmd "layout stacking"
+  command "*Hyper+F2"     $ i3Cmd "layout tabbed"
+  command "*Hyper+F3"     $ i3Cmd "layout default"
+  command "*Hyper+C"      $ i3Cmd "kill"
+  command "*Hyper+Space"  $ i3Cmd "floating toggle"
+
+  command "+CWest"        $ i3SetWk "A4"
+  command "+CSouth"       $ i3SetWk "A6"
+  command "+CEast"        $ i3SetWk "B3"
+
+  -- Workspaces
+  let wk = ["A1", "A2", "A3", "A4", "A5", "A6", "A7", "A8"
+           ,"B1", "B2", "B3", "B4", "B5", "B6"]
+  forM_ (zip "12QWASZX34ERDF" wk) $ \(key, wk) -> do
+    command ("*Hyper+"         ++ [key]) $ i3SetWk  wk
+    command ("*Hyper*LeftAlt+" ++ [key]) $ i3MoveWk wk
+
 -- mode to control XMonad via DBus
 modeXMonad :: ModeM Commander ()
 modeXMonad = mode "xmonad" $ do
-  command "*Hyper+Z"          $ xmonadCoreExit
-  command "*Hyper+X"          $ xmonadCoreRestart
-  command "*Hyper+H"          $ xmonadCoreSetWMName "L3GD"
+  command "*Hyper+F9"         $ xmonadCoreExit
+  command "*Hyper+F10"        $ xmonadCoreRestart
   command "*Hyper+K"          $ xmonadLayoutExpand
   command "*Hyper+Backslash"  $ xmonadLayoutNext
   command "*Hyper+J"          $ xmonadLayoutShrink
@@ -132,29 +184,28 @@ modeXMonad = mode "xmonad" $ do
   command "*Hyper+Equal"      $ xmonadMasterMod ( 1)
   command "*Hyper+Enter"      $ xmonadMasterSwap
   command "*Hyper+Grave"      $ xmonadNavGridSelect
-  command "*Hyper+RightBrace" $ xmonadTabNext
-  command "*Hyper+LeftBrace"  $ xmonadTabPrev
+  command "*LeftAlt+Q"        $ xmonadTabPrev
+  command "*LeftAlt+E"        $ xmonadTabNext
   command "*Hyper+U"          $ xmonadTabUnmerge
   command "*Hyper+C"          $ xmonadWinClose
   command "*Hyper+T"          $ xmonadWinSink
 
-  -- command "+N1"               $ call $ xmonadWkSetCurrent "1"
-
   -- Workspace navigation
-  forM_ (zip "1234QWERASDF" "123456789ABC") $ \(key, wk) -> do
-    command ("*Hyper+"         ++ [key]) $ xmonadWkSetCurrent [wk]
-    command ("*Hyper*LeftAlt+" ++ [key]) $ xmonadWkMoveWindow [wk]
+  let wk = [(0, "A0"), (0, "A1"), (0, "A2"), (0, "A3")
+           ,(0, "A4"), (0, "A5"), (0, "A6"), (0, "A7")
+           ,(1, "B0"), (1, "B1"), (1, "B2"), (1, "B3")
+           ,(1, "B4"), (1, "B5")
+           ]
 
-  -- Screen navigation
-  forM_ (zip3 ["Comma", "Dot"] ["N4", "N6"] [0, 1]) $ \(k0, k1, scr) -> do
-    command ("*Hyper+"         ++ k0) $ xmonadScreenSetCurr scr
-    command ("*Hyper*LeftAlt+" ++ k0) $ xmonadScreenMoveWin scr
-    command ("*Hyper+"         ++ k1) $ xmonadScreenMoveWin scr
+  forM_ (zip "12QWASZX34ERDF" wk) $ \(key, (sc, wk)) -> do
+    command ("*Hyper+"         ++ [key]) $ xmonadScreenSetWk sc wk
+    command ("*Hyper*LeftAlt+" ++ [key]) $ xmonadWinMoveTo wk
 
   -- Directional window navigation
-  forM_ (zip ["L", "Apostrophe", "P", "SemiColon"] [0, 1, 2, 3]) $ \(key, dir) -> do
-    command ("*Hyper+"         ++ key) $ xmonadNavMove dir
-    command ("*Hyper*LeftAlt+" ++ key) $ xmonadTabMerge dir
+  forM_ (zip ["A", "D", "W", "S"] [0, 1, 2, 3]) $ \(key, dir) -> do
+    command ("*LeftAlt+"            ++ key) $ xmonadNavGo dir
+    command ("*LeftAlt*LeftShift+"  ++ key) $ xmonadNavSwap dir
+    command ("*LeftAlt*RightAlt+"   ++ key) $ xmonadTabMerge dir
 
 {- ########################################################################################## -}
 
@@ -176,6 +227,9 @@ modeEclipse = mode "eclipse" $ do
   command "!N1+MR"            $ eclipseGoForward
   command "!N2+ML"            $ eclipseOpenDeclaration
   command "!N2+MR"            $ eclipseFindReferences
+  
+  command "!M4"              $ eclipseGoBack
+  command "!M5"              $ eclipseGoForward
 
 modeFirefox :: ModeM Commander ()
 modeFirefox = mode "firefox" $ do
@@ -184,6 +238,10 @@ modeFirefox = mode "firefox" $ do
   command "+N3"               $ firefoxGoForward
   command "+N4"               $ firefoxOpenInNewTab
   command "*LeftShift+N4"     $ firefoxSearchForSel
+
+  command "+CHLeft"           $ firefoxGoBack
+  command "+CThumb"           $ firefoxTabClose
+  command "+CHRight"          $ firefoxGoForward
 
 modeGEdit :: ModeM Commander ()
 modeGEdit = mode "gedit" $ do
@@ -202,9 +260,18 @@ modeMPlayer = mode "mplayer" $ do
   command "+WheelDown:N"      $ downUp keyVolumeDown
   command "+WheelUp:N"        $ downUp keyVolumeUp
 
+modeNetBeans :: ModeM Commander ()
+modeNetBeans = mode "netbeans" $ do
+  command "!M1"               $ nbQuickOpenFile
+
 modeOpera :: ModeM Commander ()
 modeOpera = mode "opera" $ do
   return ()
+
+modeRubyMine :: ModeM Commander ()
+modeRubyMine = mode "rubymine" $ do
+  command "+N1"               $ rubyMineRun
+  command "+CThumb"           $ rubyMineRun
 
 modeSublime :: ModeM Commander ()
 modeSublime = mode "sublime" $ do
@@ -216,7 +283,7 @@ modeVMware = mode "vmware" $ do
 
 modeXTerm :: ModeM Commander ()
 modeXTerm = mode "xterm" $ do
-  command "+N1"               $ downUp keyQ
+  -- command "+N1"               $ downUp keyQ
   fastMouseWheel 5
 
 {- ########################################################################################## -}
@@ -224,7 +291,7 @@ modeXTerm = mode "xterm" $ do
 modeSesDl :: ModeM Commander ()
 modeSesDl = mode "Dl" $ do
   command "!M1+Grave" $ do
-    at "Dl"   $ xmonadWkSetCurrent "1"
+    at "Dl"   $ xmonadWkSetCurrent "A0"
     at "Main" $ activate
 
 modeSesMain :: ModeM Commander ()
@@ -240,7 +307,9 @@ switcher = do
   mClass0 "krusader"            $ setModeLSX "krusader"
   mClass1 "libreoffice-writer"  $ setModeLSX "lowriter"
   mClass1 "MPlayer"             $ setModeLSX "mplayer"
+  mClass1 "netbeans"            $ setModeLSX "netbeans" -- TODO: fix class
   mClass0 "opera"               $ setModeLSX "opera"
+  mClass1 "jetbrains-rubymine"  $ setModeLSX "rubymine"
   mClass0 "sublime"             $ setModeLSX "sublime"
   mClass0 "vmware"              $ setModeLSX "vmware"
   mClass0 "xterm"               $ setModeLSX "xterm"
@@ -261,19 +330,47 @@ main = daemon $ do
     addSink "Main"  uinput0 $ return () 
     addSink "Dl"    uinput1 $ return ()
     setFocusHook          $ modeSwitcher switcher
-    setSessionFilter      $ sesFilt
+    --setSessionFilter      $ sesFilt
     setSessionSwitchHook  $ enableSessionMode
   
   runMode macro cmd $ do
     registerKeys
+
+    command "+CU1" $ do
+      lift $ threadDelay 100000 
+      forM_ [keyC, keyO, keyO, keyK, keyI, keyE] $ \k -> do
+        downUp k
+        lift $ threadDelay 100000 
+
+    command "*Hyper+P" $ do
+      lift $ threadDelay 1000000 
+      replicateM_ 5 $ do
+        forM_ [keyC, keyO, keyO, keyK, keyI, keyE, key2] $ \k -> do
+          hold keyLeftShift $ downUp k
+          lift $ threadDelay 200000 
+          downUp keyDown
+
+    command "!CRed+F14"   $ putStrLn "RED"
+    command "!CBlue+F14"  $ putStrLn "BLUE"
+    command "!CPink+F14"  $ putStrLn "PINK"
+
+    {-command "+M1"         $ putStrLn "X"
+    command "+M2"         $ downUp keyB
+    command "+M3"         $ downUp keyC
+    command "+M4"         $ downUp keyD -}
+    command "+M5"         $ downUp keyE 
+
     command "!M1+ESC"     $ nextSession
+    command "*Hyper+F9"   $ toggleModes [["global", "xmonad"]]
+    command "*Hyper+F10"  $ toggleModes [["global", "apps"]]
     command "*Hyper+F11"  $ run1 "gnome-calculator" ""
-    command "*Hyper+F12"  $ toggleModes2 ["local"] ["test"] 
+    command "*Hyper+F12"  $ toggleModes [["local"], ["test"]] 
 
     mode "global" $ do
       modeApps
       modeGuayadeque
       modeVolume
+      --modeI3
       modeXMonad
 
     mode "local" $ do
@@ -284,18 +381,21 @@ main = daemon $ do
       modeKrusader
       modeLibreOfficeWriter
       modeMPlayer
+      modeNetBeans
       modeOpera
+      modeRubyMine
       modeSublime
       modeVMware
       modeXTerm
 
-    mode "session" $ do
+    {-mode "session" $ do
       modeSesMain
-      modeSesDl
+      modeSesDl -}
 
     mode0 "test" $ do
       command "+N1" $ xmonadWkSetCurrentG "0_1"
   
+  -- debug >>> 
   evdev >>> macro >>> hub
   initCommander cmd
 

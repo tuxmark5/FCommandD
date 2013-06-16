@@ -50,8 +50,8 @@ import            System.Posix.Env (setEnv)
 
 instance CommandC Commander (CmdM ()) where 
   runCommand cmd m = forkIO_ $ evalStateT m cmd
-instance CommandC Commander (IO ()) where 
-  runCommand _   m = forkIO_ $ m
+--instance CommandC Commander (IO ()) where 
+--  runCommand _   m = forkIO_ $ m
 instance CommandC Commander (ProM ()) where 
   runCommand cmd m = forkIO_ $ withProfile cmd $ \pro -> evalStateT m (cmd, pro)
 
@@ -194,6 +194,19 @@ newProfile name sink = do
 initCommander :: Commander -> CD ()
 initCommander cmd = lift $ modifyProfiles cmd id 
 
+eql0 :: ByteString -> Bool
+eql0 s = any (== s) 
+  [ "dwm"
+  , "i3"
+  , "/usr/bin/i3"
+  , "fmonad"
+  , "/home/angel/.cabal/bin/fmonad"
+  , "lxpanel"
+  ]
+
+eql1 :: ByteString -> Bool
+eql1 s = any eql0 $ B.split '/' s
+
 newCommander  :: (Session -> IO ByteString) -> CmdM () 
               -> CD (Commander, Sink MacroFilter, Sink HubFilter)
 newCommander profId m = do
@@ -209,7 +222,7 @@ newCommander profId m = do
     , cmdProfId     = profId
     , cmdProfiles   = proVar
     , cmdSesChan    = undefined
-    , cmdSesFilter  = \s -> any (== s) ["dwm", "fmonad", "xfce4-session"] 
+    , cmdSesFilter  = eql0
     , cmdSesObs     = undefined
     , cmdSesHook    = return ()
     }
@@ -238,6 +251,7 @@ newCommander profId m = do
 loopFocus :: Commander -> Profile -> ChanI FocusEvent -> IO ()
 loopFocus cmd p fc = do
   e <- readChan fc
+  --putStrLn $ show e
   case e of
     FocusChanged {} -> onFocusChanged cmd p e >> loopFocus cmd p fc
     FocusDestroyed  -> return ()
@@ -257,10 +271,14 @@ onFocusChanged cmd pr fe = do
 
 onSessionCreated :: Commander -> Session -> IO ()
 onSessionCreated cmd ses = do
+  putStrLn "Starting session creation"
+
   putStrLn $ show $ sesDisplay ses  
   -- Connect to DBus
   let (Just ad)  = addresses $ decodeUtf8 $ sesAddress ses
+  putStrLn "Connected to DBUS0"
   client        <- connectFirst ad
+  putStrLn "Connected to DBUS"
   
   -- Update profile
   name          <- cmdProfId cmd ses
@@ -268,9 +286,11 @@ onSessionCreated cmd ses = do
     { prClient  = client
     , prSession = Just ses    
     }    
+  putStrLn "Updated profile"
     
   -- Connect to X
   startFocusObserver cmd profile
+  putStrLn "Started focus observer"
   
 onSessionDestroyed :: Commander -> Session -> IO ()
 onSessionDestroyed cmd ses = do

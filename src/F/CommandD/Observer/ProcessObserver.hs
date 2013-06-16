@@ -90,6 +90,7 @@ newProcessObserver inotify = do
   watchDescr      <- mapCatch addW ["/lib/ld-linux.so.2", "/lib64/ld-linux-x86-64.so.2"]
   let pm = ProcessObserver chanO procs wakeVar watchDescr
   forkIO $ monitorLoop pm []
+  tryPutMVar wakeVar ()
   return (pm, chanI)
 
 {- ########################################################################################## -}

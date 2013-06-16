@@ -10,6 +10,7 @@ module F.CommandD.Filter.MacroFilter
 , ModeM
 , aliasDev
 , aliasKey
+, aliasKey'
 , command
 , commandN
 , newMacroFilter
@@ -40,6 +41,69 @@ import            F.CommandD.Source (SourceId)
 import            F.CommandD.Util.KeyMap
 import            System.Linux.Input
 {- ########################################################################################## -}
+
+{-
+  TODO: 
+    * nodeAction should support CE () as well as IO ()
+    * (default) nodes should have default keymap + dynamic propagation
+    * key nodes in general should be fully polymorphic to allow recording + playback of events for example
+    * same goes for MODE nodes (some modes could support dynamic adding of stuff)
+    * CommandC should be cleaned up?
+    * keys should contain aditional metadata:
+      * is key filtered by default? (CRed, CBlue)   propagate/filtered   True
+      * is key mandatory/optional? (CRed, CBlue)    mandatory/optional   True
+      * need key database
+    * generic key-to-key filter, which can:
+      * replace one key with another
+      * filter out the key completely
+    * UDP sink
+
+    * hotplug of evdev devices - listen on udev events?
+
+    * incremental macro/command construction
+      hyper $ do
+        on "S"
+        on "Q" $ hyper $ on "Z"
+
+      on "+LeftCtrl" $ do
+        on "*A"
+        on "*B"
+
+
+    * dynamic SEMAPHORE nodes could replace MODES:
+      sema "someName" $ do
+        key $ \k -> disable "some"
+    * dinamic node insertion: BEFORE, HERE, AFTER ; priorities
+
+    * modes should be able to listen on any kind of events: key, mouse, dbus, pipe
+      * essentialy fcommand should be handle any kind of [event -> fcommand -> event] interaction
+      * some events can't be propagated, some can't
+      * filters should be event-type agnostic
+      * sinks should be event-type agnostic 
+        ??event itself should carry it propagation/release information
+        >>UDP sinks should simply serialize events
+
+        spec sinks => filters => hub/distributor - sorts events and sends to specific sinks
+          or sends all events to one sink if that sink will support such behavior
+
+      * sources should be event-type specific
+
+    * need ability to introduce virtual events into any location in the event chain:
+      vsink?? runMacro <sink> <macro monad>
+
+    * timeouts
+    * dynamic creation of "expect this to happen within 5 secs" events
+
+    ? modes should be oriented in graph to allow menu-like interaction ?
+    -> switchMode probably is enough
+
+    * emacs/lisp like commands?  fcommand > dmenu > dbus/pipe > fcommand (eval & exec)
+      enableMode, disableMode -> should be hooked into modes/nodes & general event propagation chain
+
+    * cyborg colors
+      onBeginMode : on0/onBegin
+      onEndMode   : on1/onEnd
+-}
 
 type MacroFilter = MVar MacroFilterS
   
@@ -283,8 +347,22 @@ onUnknownEvent = get >>= \e -> do
 pressedKeyCount :: MacroM Int
 pressedKeyCount = S.gets mfsPressedKeys >>= return . length
 
+
+isTempEvent :: Event -> Bool
+isTempEvent k = case eventCode k of
+  0x11F     -> True
+  0x120     -> True
+  0x121     -> True
+  otherwise -> False
+
+testTemp :: Event -> MacroM Bool -> MacroM Bool
+testTemp e f = do
+  if isTempEvent e 
+    then return True
+    else f
+
 processKeyEvent :: Event -> MacroM Bool
-processKeyEvent e = do
+processKeyEvent e = testTemp e $ do
   let key = toKey e
   updatePressedKeys e key
   case eventValue e of
@@ -365,6 +443,13 @@ aliasKey key0 dev1 key1 = S.get >>= \ms0 -> do
   case (dev, key) of
     (Just d,  Just k) -> S.put $ ms0 { msKeyMap = addKey (msKeyMap ms0) key1 d (keyCode k) }
     (d,       k     ) -> lift $ putStrLn $ concat ["[ERROR] Invalid key alias", show d, show k]
+
+aliasKey' :: Word16 -> ByteString -> ByteString -> ModeM s ()
+aliasKey' code dev1 key1 = S.get >>= \ms0 -> do
+  let dev = lookupDev (msKeyMap ms0) dev1
+  case (dev) of
+    Just d  -> S.put $ ms0 { msKeyMap = addKey (msKeyMap ms0) key1 d code }
+    Nothing -> lift $ putStrLn $ concat ["[ERROR] Invalid key alias", show dev]
 
 command :: CommandC s c => String -> c -> ModeM s ()
 command combo cmd = S.get >>= \ms0 -> do 

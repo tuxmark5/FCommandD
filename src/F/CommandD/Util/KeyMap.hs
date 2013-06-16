@@ -452,7 +452,7 @@ defaultKeys =
   , ("KpEqual",             keyKpEqual          )
   , ("KpJpComma",           keyKpJpComma        )
   , ("KpLeftParen",         keyKpLeftParen      )
-  , ("KpMInus",             keyKpMInus          )
+  , ("KpMinus",             keyKpMInus          )
   , ("KpPlus",              keyKpPlus           )
   , ("KpPlusMinus",         keyKpPlusMinus      )
   , ("KpRightParen",        keyKpRightParen     )
